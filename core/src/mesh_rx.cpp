@@ -4,6 +4,7 @@
 #include "dect2/results_io.h"
 #include "dect2/mesh_lora.h"
 #include "dect2/mesh_proto.h"
+#include "dect2/mesh_record.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -153,6 +154,21 @@ struct MeshReceiver::Impl {
     double lastGood = -1e9, lastPreamble = -1e9;
     uint64_t preamblesSeen = 0;
 
+    MeshRecorder rec;                    // the CSV log on disk (off until a folder is set)
+
+    static double wallNow() { return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+
+    // every packet goes to the list (the last kPacketCap) and, when recording, to the day's file
+    void pushPacket(MeshPacket&& row) {
+        std::string name;
+        if (row.protocol <= 2 && !row.from.empty()) {
+            auto it = nodeIdx.find(std::to_string(row.protocol) + "|" + row.from);
+            if (it != nodeIdx.end()) name = tel.nodes[it->second].longName;
+        }
+        rec.packet(row, wallNow(), name);
+        capPush(tel.packets, std::move(row), kPacketCap);
+    }
+
     void logf(const std::string& s) {
         std::function<void(const std::string&)> cb;
         { std::lock_guard<std::mutex> lk(mu); cb = log; }
@@ -291,7 +307,7 @@ struct MeshReceiver::Impl {
         if (!good) {
             row.note = "CRC error";
             count(di.protocol, "CRC error");
-            capPush(tel.packets, std::move(row), kPacketCap);
+            pushPacket(std::move(row));
             return;
         }
         MeshRadioInfo ri;
@@ -311,7 +327,7 @@ struct MeshReceiver::Impl {
         if (!r.ok) {
             row.note = r.packet.note.empty() ? "not a " + std::string(protoName(di.protocol)) + " packet" : r.packet.note;   // (the first one tried)
             count(di.protocol, "unknown");
-            capPush(tel.packets, std::move(row), kPacketCap);
+            pushPacket(std::move(row));
             return;
         }
         if (proto_ == 5) { onLorawan(c, t, f, r, std::move(row)); return; }
@@ -355,10 +371,11 @@ struct MeshReceiver::Impl {
             if (u.batteryPct >= 0 || u.voltage >= 0 || u.hasEnv || u.hasPosition) {   // a telemetry or position report: kept with its time
                 MeshReading rd;
                 rd.timeSec = t; rd.protocol = pr; rd.id = u.nodeId;
-                rd.unixTime = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+                rd.unixTime = wallNow();
                 rd.batteryPct = u.batteryPct; rd.voltage = u.voltage; rd.channelUtilPct = u.channelUtilPct; rd.airUtilTxPct = u.airUtilTxPct;
                 rd.uptimeS = u.uptimeS; rd.hasEnv = u.hasEnv; rd.tempC = u.tempC; rd.humidity = u.humidity; rd.pressureHpa = u.pressureHpa;
                 rd.hasPosition = u.hasPosition; rd.lat = u.lat; rd.lon = u.lon; rd.altM = u.altM;
+                rec.reading(rd, (float)f.snrDb, n.longName);
                 capPush(tel.readings, std::move(rd), kReadingCap);
             }
             if (u.batteryPct >= 0 || u.voltage >= 0) n.devSec = t;
@@ -381,7 +398,7 @@ struct MeshReceiver::Impl {
             else if (mm.protocol == 2) mm.fromName = m.from;   // MeshCore puts the sender's name in the text
             capPush(tel.messages, std::move(mm), kMessageCap);
         }
-        capPush(tel.packets, std::move(row), kPacketCap);
+        pushPacket(std::move(row));
     }
 
     MeshAprsStation& aprsStation(int protocol, const std::string& call) {
@@ -445,7 +462,7 @@ struct MeshReceiver::Impl {
             mm.channel = m.channel; mm.from = m.from; mm.fromName = m.from; mm.to = m.to; mm.text = m.text.substr(0, 240); mm.packetId = m.packetId;
             capPush(tel.messages, std::move(mm), kMessageCap);
         }
-        capPush(tel.packets, std::move(row), kPacketCap);
+        pushPacket(std::move(row));
     }
 
     // LoRaWAN: the device table (by DevAddr; join requests by DevEUI) and the packet row. Nothing is decrypted.
@@ -505,7 +522,7 @@ struct MeshReceiver::Impl {
             }
         }
         (void)c;
-        capPush(tel.packets, std::move(row), kPacketCap);
+        pushPacket(std::move(row));
     }
 
     void report() {
@@ -663,6 +680,9 @@ bool MeshReceiver::telemetry(MeshTelemetry& out, uint64_t lastSeq) {
     return true;
 }
 void MeshReceiver::setLogCallback(std::function<void(const std::string&)> cb) { std::lock_guard<std::mutex> lk(p_->mu); p_->log = std::move(cb); }
+void MeshReceiver::setRecordDir(const std::string& dir) { p_->rec.setDir(dir); }
+std::string MeshReceiver::recordStatus() const { return p_->rec.status(); }
+long long MeshReceiver::recordLines() const { return p_->rec.linesWritten(); }
 void MeshReceiver::setTunedHz(double hz) { std::lock_guard<std::mutex> lk(p_->mu); p_->tunedHz = hz; p_->dirty = true; }
 void MeshReceiver::setRegion(int r) { std::lock_guard<std::mutex> lk(p_->mu); p_->region = r == 1 || r == 2 ? r : 0; p_->dirty = true; }
 void MeshReceiver::setProtocols(int mask) { std::lock_guard<std::mutex> lk(p_->mu); p_->protocols = mask & 31; p_->dirty = true; }

@@ -29,6 +29,10 @@ public:
     std::string saveResults() const;                     // for the results file (results_io.h)
     bool loadResults(const std::string& blob);           // false: not this build's format, nothing changes
     void setLogCallback(std::function<void(const std::string&)> cb);   // events for the log pane; may be called from the receiver thread
+    // Recording: every packet and telemetry / position report also appended to a CSV file per day in this folder ("" = off; mesh_record.h)
+    void setRecordDir(const std::string& dir);
+    std::string recordStatus() const;                    // "" off, else the folder or the last error
+    long long recordLines() const;                       // lines written since the start
 
     // settings (any thread; they take effect at the next feed())
     void setTunedHz(double hz);                          // the user's frequency (default: meshTuning().defMhz); places the channels

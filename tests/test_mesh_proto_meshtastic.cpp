@@ -72,6 +72,10 @@ int main() {
         p = meshtasticNodeInfo(rt, 0x2002, 3, 3);
         r = mp.decodeMeshtastic(p.data(), p.size(), kRadio);
         CHECK(r.nodes.size() == 1 && r.nodes[0].hwModel == "HELTEC_V3" && r.nodes[0].role == "ROUTER", "router role");
+        MeshtasticNode em = b; em.longName = "SC Rep \u2622\uFE0F \U0001F4E1"; em.shortName = "\u26A1\uFE0F";   // emoji with a variation selector
+        p = meshtasticNodeInfo(em, 0x2003, 3, 3);
+        r = mp.decodeMeshtastic(p.data(), p.size(), kRadio);
+        CHECK(r.nodes.size() == 1 && r.nodes[0].longName == "SC Rep \u2622 \U0001F4E1" && r.nodes[0].shortName == "\u26A1", "names without variation selectors");
     }
     { // position, full precision and 13 bit precision
         auto p = meshtasticPosition(a, 0x3001, 3, 3, 1760000000);

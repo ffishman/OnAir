@@ -184,6 +184,7 @@ void showFatalError(const char* title, const char* text) {
 Prefs& basePrefs() { static DefaultsPrefs p; return p; }
 
 std::vector<std::string> uiFontCandidates() { return {"/System/Library/Fonts/Helvetica.ttc"}; }
+std::vector<std::string> symbolFontCandidates() { return {"/System/Library/Fonts/Apple Symbols.ttf"}; }
 std::vector<std::string> cjkFontCandidates() { return {"/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Medium.ttc", "/System/Library/Fonts/STHeiti Light.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc"}; }
 std::vector<std::string> monoFontCandidates() { return {"/System/Library/Fonts/Menlo.ttc"}; }
 std::string uiLanguage() {

@@ -160,7 +160,9 @@ def main():
     types = Counter(r.get("type") or "?" for r in good)
 
     # nodes
-    N = defaultdict(lambda: {"snr": [], "hops": [], "t": [], "name": "", "types": Counter(), "days": set()})
+    # The SNR of a packet is that of the last transmitter, which for a relayed packet is the repeater, not the node: the node's own
+    # signal statistics use only the packets heard directly (0 hops)
+    N = defaultdict(lambda: {"snr": [], "st": [], "hops": [], "t": [], "name": "", "types": Counter(), "days": set()})
     for r in good:
         k = r.get("from")
         if not k:
@@ -170,11 +172,12 @@ def main():
         if r.get("name"):
             n["name"] = r["name"]
         s = num(r.get("snr_db"))
-        if s is not None:
-            n["snr"].append(s)
         h = num(r.get("hops"))
         if h is not None:
             n["hops"].append(int(h))
+        if s is not None and (h == 0 or (h is None and r.get("network") != "Meshtastic")):
+            n["snr"].append(s)
+            n["st"].append(r["_t"])
         n["t"].append(r["_t"])
         n["types"][r.get("type")] += 1
         n["days"].add(r["time"][:10])
@@ -197,7 +200,8 @@ def main():
                       "p10": pct(n["snr"], .1), "med": pct(n["snr"], .5), "p90": pct(n["snr"], .9),
                       "hops": Counter(n["hops"]).most_common(1)[0][0] if n["hops"] else None,
                       "bat": (min(bat), max(bat)) if bat else None, "volt": (min(volt), max(volt)) if volt else None,
-                      "reboots": reboots, "pos": last, "dist": dist, "snr": n["snr"], "t": n["t"]})
+                      "reboots": reboots, "pos": last, "dist": dist, "snr": n["snr"], "st": n["st"], "t": n["t"],
+                      "direct": sum(1 for h in n["hops"] if h == 0)})
     nodes.sort(key=lambda x: -x["n"])
 
     # by hour of the day
@@ -207,7 +211,7 @@ def main():
         H[h]["n"] += 1
         if r.get("crc_ok") != "1":
             H[h]["crc"] += 1
-        elif num(r.get("snr_db")) is not None:
+        elif num(r.get("snr_db")) is not None and r.get("hops") in ("0", "") and not (r.get("hops") == "" and r.get("network") == "Meshtastic"):
             H[h]["snr"].append(num(r["snr_db"]))
     for r in rd:
         if num(r.get("channel_util_pct")) is not None:
@@ -235,7 +239,8 @@ def main():
     print("Packets: %d good, %d with a CRC error (%.1f %%), %d not decrypted" % (len(good), crc, 100.0 * crc / max(1, len(pk)), notdec))
     print("Nodes: %d   Readings: %d" % (len(nodes), len(rd)))
     for n in nodes[:10]:
-        print("  %-28s %-10s %5d packets  SNR %s / %s / %s dB  %s" % ((n["name"] or "")[:28], n["id"], n["n"], f1(n["p10"]), f1(n["med"]), f1(n["p90"]),
+        sn = "SNR %s / %s / %s dB" % (f1(n["p10"]), f1(n["med"]), f1(n["p90"])) if n["snr"] else "relayed only"
+        print("  %-28s %-10s %5d packets  %-26s %s" % ((n["name"] or "")[:28], n["id"], n["n"], sn,
                                                                        ("%.1f km" % n["dist"]) if n["dist"] is not None else ""))
 
     # ---- HTML
@@ -249,15 +254,16 @@ h1{font-size:20px}h2{font-size:16px;margin-top:28px}table{border-collapse:collap
              % (when(t0), when(t1), (t1 - t0) / 86400, len(good), crc, 100.0 * crc / max(1, len(pk)), notdec, len(nodes), len(rd)))
     o.append("<p>Packet types: %s</p>" % html.escape(", ".join("%s %d" % kv for kv in types.most_common())))
 
-    o.append("<h2>Nodes</h2>")
-    o.append(table(["Node", "Id", "Packets", "Days", "First", "Last", "SNR 10% / med / 90%", "Hops", "Battery %", "Voltage", "Reboots", "Position", "km"],
-                   [[n["name"], n["id"], n["n"], n["days"], when(n["first"]), when(n["last"]), "%s / %s / %s" % (f1(n["p10"]), f1(n["med"]), f1(n["p90"])),
+    o.append("<h2>Nodes</h2><p>The SNR of a relayed packet is the repeater's, not the node's: the SNR columns use only the packets heard "
+             "directly (Direct = how many). A node only heard through repeaters has no SNR of its own here.</p>")
+    o.append(table(["Node", "Id", "Packets", "Days", "First", "Last", "Direct", "SNR direct 10% / med / 90%", "Hops", "Battery %", "Voltage", "Reboots", "Position", "km"],
+                   [[n["name"], n["id"], n["n"], n["days"], when(n["first"]), when(n["last"]), n["direct"], "%s / %s / %s" % (f1(n["p10"]), f1(n["med"]), f1(n["p90"])),
                      "" if n["hops"] is None else n["hops"], "" if not n["bat"] else "%.0f - %.0f" % n["bat"], "" if not n["volt"] else "%.2f - %.2f" % n["volt"],
                      n["reboots"] or "", "" if not n["pos"] else "%s, %s" % (n["pos"]["lat"], n["pos"]["lon"]), f1(n["dist"])] for n in nodes]))
 
     o.append("<h2>By hour of the day</h2>")
     o.append(svg_bars([H[h]["n"] / days_span for h in hours], hours, "Packets per hour (average over the days)"))
-    o.append(svg_bars([pct(H[h]["snr"], .5) for h in hours], hours, "Median SNR by hour (all nodes)", " dB"))
+    o.append(svg_bars([pct(H[h]["snr"], .5) for h in hours], hours, "Median SNR by hour (packets heard directly)", " dB"))
     o.append(svg_bars([100.0 * H[h]["crc"] / H[h]["n"] if H[h]["n"] else None for h in hours], hours, "Frames with a CRC error by hour (interference, weak frames)", " %"))
     if any(H[h]["cu"] for h in hours):
         o.append(svg_bars([pct(H[h]["cu"], .5) for h in hours], hours, "Channel utilisation reported by the nodes, median by hour", " %"))
@@ -267,14 +273,14 @@ h1{font-size:20px}h2{font-size:16px;margin-top:28px}table{border-collapse:collap
     if len(days) > 1:
         o.append(svg_bars([D[d]["n"] for d in days], [d[5:] for d in days], "Packets per day"))
 
-    top = nodes[:6]
+    top = [n for n in nodes if len(n["snr"]) > 1][:6]
     if top:
         o.append("<h2>Signal over time</h2><p>Hourly median SNR of the nodes heard most. A slow fall over weeks points at the antenna or the cable; "
                  "a rise at night or before a front points at the troposphere.</p>")
         ser = []
         for n in top:
             b = defaultdict(list)
-            for t, s in zip(n["t"], n["snr"]):
+            for t, s in zip(n["st"], n["snr"]):
                 b[int(t // 3600) * 3600].append(s)
             ser.append((n["name"] or n["id"], [(k, statistics.median(v)) for k, v in sorted(b.items())]))
         o.append(svg_lines(ser, "SNR (dB), hourly median", " dB"))

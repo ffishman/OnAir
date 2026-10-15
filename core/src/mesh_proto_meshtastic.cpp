@@ -63,12 +63,23 @@ std::string portName(int port) {
 
 std::string nodeStr(uint32_t n) { return n == 0xFFFFFFFFu ? "^all" : meshtasticNodeIdString(n); }
 
-std::string clip(const std::string& s, size_t n) { return s.size() <= n ? s : s.substr(0, n) + "..."; }
+std::string clip(const std::string& s, size_t n) {
+    if (s.size() <= n) return s;
+    while (n > 0 && ((uint8_t)s[n] & 0xC0) == 0x80) n--;   // not inside a UTF-8 character
+    return s.substr(0, n) + "...";
+}
 
-// printable text only: replaces control characters, keeps UTF-8 bytes
+// printable text only: replaces control characters, keeps UTF-8 bytes; drops the invisible emoji joiners and variation selectors
+// (U+200D, U+FE0E, U+FE0F), which no UI font has and which would show as a box after a symbol
 std::string cleanText(const uint8_t* p, size_t n) {
     std::string s;
-    for (size_t i = 0; i < n; i++) s += (p[i] < 0x20 && p[i] != '\n') ? ' ' : (char)p[i];
+    for (size_t i = 0; i < n; i++) {
+        if (i + 2 < n && ((p[i] == 0xEF && p[i + 1] == 0xB8 && (p[i + 2] == 0x8E || p[i + 2] == 0x8F)) || (p[i] == 0xE2 && p[i + 1] == 0x80 && p[i + 2] == 0x8D))) {
+            i += 2;
+            continue;
+        }
+        s += (p[i] < 0x20 && p[i] != '\n') ? ' ' : (char)p[i];
+    }
     return s;
 }
 
@@ -136,8 +147,8 @@ void decodePort(const DataMsg& d, uint32_t from, uint32_t to, const MeshPacketIn
         int hw = 0, role = 0;
         bool hasKey = false;
         while (rd.next(f)) {
-            if (f.num == 2 && f.wire == 2) u.longName = f.asString();
-            else if (f.num == 3 && f.wire == 2) u.shortName = f.asString();
+            if (f.num == 2 && f.wire == 2) u.longName = cleanText(f.data, f.len);
+            else if (f.num == 3 && f.wire == 2) u.shortName = cleanText(f.data, f.len);
             else if (f.num == 5 && f.wire == 0) hw = (int)f.value;
             else if (f.num == 7 && f.wire == 0) role = (int)f.value;
             else if (f.num == 8 && f.wire == 2) hasKey = f.len == 32;

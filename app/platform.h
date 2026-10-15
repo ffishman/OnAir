@@ -54,6 +54,7 @@ int locateState(double& lat, double& lon, double& accuracyM, std::string& msg);
 
 // Paths of fonts to try, best first (proportional UI font, monospaced font)
 std::vector<std::string> uiFontCandidates();
+std::vector<std::string> symbolFontCandidates();   // system symbol font merged into the UI fonts for the symbols in node and station names (no colour emoji)
 std::vector<std::string> cjkFontCandidates();   // system CJK font merged into the UI fonts for Chinese/Japanese/Korean service names
 std::vector<std::string> monoFontCandidates();
 

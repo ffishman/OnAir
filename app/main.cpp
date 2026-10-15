@@ -494,6 +494,13 @@ int main(int argc, char** argv) {
     for (const auto& f : plat::monoFontCandidates()) if (access(f.c_str(), R_OK) == 0 && (ui = io.Fonts->AddFontFromFileTTF(f.c_str(), 13.0f))) break; // the whole UI is monospaced
     for (const auto& f : plat::monoFontCandidates()) if (access(f.c_str(), R_OK) == 0 && (app.mono = io.Fonts->AddFontFromFileTTF(f.c_str(), 13.0f))) break;
     if (!ui) ui = io.Fonts->AddFontDefault();
+    // symbols in node and station names (Meshtastic long names, RDS, EPG: arrows, weather, radio signs): merge a system symbol font
+    for (const auto& f : plat::symbolFontCandidates()) if (access(f.c_str(), R_OK) == 0) {
+        ImFontConfig mc; mc.MergeMode = true;
+        mc.DstFont = ui; if (!io.Fonts->AddFontFromFileTTF(f.c_str(), 13.0f, &mc)) continue;
+        if (app.mono && app.mono != ui) { ImFontConfig mm; mm.MergeMode = true; mm.DstFont = app.mono; io.Fonts->AddFontFromFileTTF(f.c_str(), 13.0f, &mm); }
+        break;
+    }
     // CJK service/EPG names: merge a system CJK font (ImGui 1.92 rasterises only the glyphs actually drawn).
     for (const auto& f : plat::cjkFontCandidates()) if (access(f.c_str(), R_OK) == 0) {
         ImFontConfig mc; mc.MergeMode = true;

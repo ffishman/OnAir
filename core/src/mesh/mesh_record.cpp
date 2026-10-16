@@ -70,7 +70,8 @@ MeshRecorder::~MeshRecorder() { closeFiles(); }
 void MeshRecorder::closeFiles() {
     if (pk_) fclose(pk_);
     if (rd_) fclose(rd_);
-    pk_ = rd_ = nullptr;
+    if (ch_) fclose(ch_);
+    pk_ = rd_ = ch_ = nullptr;
     day_.clear();
 }
 
@@ -87,7 +88,7 @@ bool MeshRecorder::open(double unixTime) {
     const std::tm l = localOf(unixTime);
     char day[16];
     std::strftime(day, sizeof day, "%Y-%m-%d", &l);
-    if (pk_ && rd_ && day_ == day) return true;
+    if (pk_ && rd_ && ch_ && day_ == day) return true;
     closeFiles();
     std::error_code ec;
     const std::filesystem::path d = std::filesystem::u8path(dir_);
@@ -98,7 +99,10 @@ bool MeshRecorder::open(double unixTime) {
     rd_ = openCsv(d / (std::string("mesh-readings-") + day + ".csv"),
                   "unix_time,time,network,id,name,snr_db,battery_pct,voltage,channel_util_pct,air_util_tx_pct,uptime_s,temp_c,humidity_pct,"
                   "pressure_hpa,lat,lon,alt_m\n");
-    if (!pk_ || !rd_) { closeFiles(); error_ = "cannot write to " + dir_; return false; }
+    ch_ = openCsv(d / (std::string("mesh-channel-") + day + ".csv"),
+                  "unix_time,time,frequency_hz,preset,bw_hz,windows,floor_dbfs,p50_dbfs,p90_dbfs,peak_dbfs,occupancy_pct,decoded_airtime_pct,"
+                  "undecoded_pct,frames,crc_bad,preambles,preambles_lost,gain_db,input_rate,samples_lost\n");
+    if (!pk_ || !rd_ || !ch_) { closeFiles(); error_ = "cannot write to " + dir_; return false; }
     day_ = day;
     error_.clear();
     return true;
@@ -142,6 +146,23 @@ void MeshRecorder::reading(const MeshReading& r, float snrDb, const std::string&
                     (r.hasPosition ? fmt("%.6f", r.lat) : "") + "," + (r.hasPosition ? fmt("%.6f", r.lon) : "") + "," + (r.hasPosition ? fmt("%.0f", r.altM) : "") + "\n";
     fputs(s.c_str(), rd_);
     fflush(rd_);
+    lines_++;
+}
+
+void MeshRecorder::channel(const MeshChannelMinute& c) {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (!open(c.unixTime)) return;
+    const std::tm l = localOf(c.unixTime);
+    char ts[24];
+    std::strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", &l);
+    auto u = [](uint64_t v) { return std::to_string(v); };
+    std::string s = fmt("%.3f", c.unixTime) + "," + ts + "," + fmt("%.0f", c.freqHz) + "," + meshCsvField(c.preset) + "," + fmt("%.0f", c.bwHz) + "," +
+                    std::to_string(c.windows) + "," + fmt("%.1f", c.floorDbfs) + "," + fmt("%.1f", c.p50Dbfs) + "," + fmt("%.1f", c.p90Dbfs) + "," +
+                    fmt("%.1f", c.peakDbfs) + "," + fmt("%.2f", c.occupancyPct) + "," + fmt("%.2f", c.decodedAirtimePct) + "," + fmt("%.2f", c.undecodedPct) + "," +
+                    u(c.frames) + "," + u(c.crcBad) + "," + u(c.preambles) + "," + u(c.preamblesLost) + "," + opt(c.gainDb, "%.1f") + "," +
+                    fmt("%.0f", c.inputRate) + "," + std::to_string(c.samplesLost) + "\n";
+    fputs(s.c_str(), ch_);
+    fflush(ch_);
     lines_++;
 }
 

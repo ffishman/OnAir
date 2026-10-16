@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
     QualityMeter qm;
     bool useFile = false, haveDev = false, synthetic = false, listen = false, atvFm = false;
     bool dpmrScan = false;
-    std::string meshRecord; int meshRegion = -1;
+    std::string meshRecord; int meshRegion = -1; double meshOccDb = 6;
     std::string netRadio;   // --net-radio: a radio on the network, as the settings keep it ("rtltcp,host,port"); used instead of the first one found
     double dvbcSr = 0; int dvbcQam = 0; bool dvbcAnnexC = false;
     int orbcommMax = 2;
@@ -86,7 +86,8 @@ int main(int argc, char** argv) {
         else if (a == "--dvbc-sr") dvbcSr = atof(next()) * 1e6;   // with --standard dvbc: a manual symbol rate in Msym/s (default: measured)
         else if (a == "--dvbc-qam") dvbcQam = atoi(next());       // with --standard dvbc: 16, 32, 64, 128 or 256 (default: found from the stream)
         else if (a == "--net-radio") netRadio = next();         // e.g. rtltcp,192.168.2.197,1234 (any type the app's "Add network radio" takes)
-        else if (a == "--mesh-record") meshRecord = next();   // Mesh: every packet and report to CSV files in this folder, one pair a day
+        else if (a == "--mesh-record") meshRecord = next();   // Mesh: every packet and report to CSV files in this folder, one set a day
+        else if (a == "--mesh-occ-threshold") meshOccDb = atof(next());   // Mesh channel file: dB above the noise floor that count as occupied (6)
         else if (a == "--mesh-region") { const std::string v = next(); meshRegion = v == "us" ? 1 : v == "anz" ? 2 : 0; }   // Mesh band plan: eu (default), us, anz
         else if (a == "--dpmr-scan") dpmrScan = true;           // with --standard dpmr: scan the 16 PMR446 channels (tune to one of them)
         else if (a == "--orbcomm-downlinks") orbcommMax = atoi(next());   // with --standard orbcomm: 1 or 2 downlinks decoded at once (default 2)
@@ -255,6 +256,8 @@ int main(int argc, char** argv) {
     if (standard == 22) e.mesh().setTunedHz(freq * 1e6);   // mesh places its channels from the tuned frequency
     if (meshRegion >= 0) e.mesh().setRegion(meshRegion);
     if (!meshRecord.empty()) { e.mesh().setRecordDir(meshRecord); printf("mesh: recording to %s\n", meshRecord.c_str()); }
+    e.mesh().setGainDb(tune.gainDb);
+    e.mesh().setOccupancyThresholdDb(meshOccDb);
     if (atvFm) e.atv().setModulation(1);
     e.setBandwidthAuto(autoBw);
     e.setSpectrumEnabled(autoBw);   // cli doesn't show the spectrum

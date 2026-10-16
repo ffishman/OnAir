@@ -1,6 +1,7 @@
-// Mesh recording: every packet and every telemetry / position report appended to CSV files on disk, one pair per day
-// (mesh-packets-YYYY-MM-DD.csv, mesh-readings-YYYY-MM-DD.csv, local date), so nothing is lost to the list limits. Each line is
-// flushed as it is written. Thread-safe: setDir() from any thread, the writes from the receiver thread.
+// Mesh recording: every packet and every telemetry / position report appended to CSV files on disk, one set per day
+// (mesh-packets-YYYY-MM-DD.csv, mesh-readings-YYYY-MM-DD.csv, local date), so nothing is lost to the list limits, and a line per
+// channel per minute of its energy (mesh-channel-YYYY-MM-DD.csv: noise floor, occupancy). Each line is flushed as it is written.
+// Thread-safe: setDir() from any thread, the writes from the receiver thread.
 #pragma once
 #include "mesh_tel.h"
 #include <cstdio>
@@ -16,6 +17,7 @@ public:
     // unixTime: the computer clock when it was decoded; name: the node's long name when known
     void packet(const MeshPacket& p, double unixTime, const std::string& name);
     void reading(const MeshReading& r, float snrDb, const std::string& name);
+    void channel(const MeshChannelMinute& c);
     std::string status() const;                          // "" off, else the folder or the last error
     long long linesWritten() const;
 
@@ -26,6 +28,7 @@ private:
     std::string dir_, day_, error_;
     FILE* pk_ = nullptr;
     FILE* rd_ = nullptr;
+    FILE* ch_ = nullptr;
     long long lines_ = 0;
 };
 

@@ -154,6 +154,25 @@ struct MeshTypeCount {
     uint32_t count = 0;
 };
 
+// One channel over one minute of the computer clock: the power of its 1 ms windows (in the channel filter's band, dBFS: not
+// calibrated, for trends at one gain) and what was decoded in it
+struct MeshChannelMinute {
+    double unixTime = 0;                 // the minute's start
+    double freqHz = 0, bwHz = 0;
+    std::string preset;
+    long long windows = 0;               // 1 ms windows measured
+    float floorDbfs = 0, p50Dbfs = 0, p90Dbfs = 0, peakDbfs = 0;   // 10th percentile (the noise floor), median, 90th, highest
+    float occupancyPct = 0;              // windows above the floor + the threshold
+    float decodedAirtimePct = 0;         // air time of the frames decoded on it (good CRC or not)
+    float undecodedPct = 0;              // occupancy no frame accounts for (collisions, weak signals, other LoRa systems)
+    // preambles: those whose sync word matched (frames + preamblesLost; the detector's false alarms in noise and other networks'
+    // sync words left out); preamblesLost: of those, the ones whose header failed (a frame of this network that was lost)
+    uint64_t frames = 0, crcBad = 0, preambles = 0, preamblesLost = 0;
+    double gainDb = -1;                  // the radio's fixed gain (-1 unknown or automatic)
+    double inputRate = 0;
+    long long samplesLost = 0;           // input samples the radio did not deliver in the minute (stalls of more than half a second)
+};
+
 struct MeshTelemetry {
     uint64_t seq = 0;            // grows with every report
     int state = 0;               // 0 searching, 1 signal (a preamble lately), 2 decoding (a good frame in the last minute)
@@ -172,6 +191,7 @@ struct MeshTelemetry {
     std::string mtRegion;        // Meshtastic region of the plan ("EU_868", ...)
     bool custom = false;         // a custom LoRa setting replaces the plan
     std::vector<MeshDecoderInfo> decoders;
+    std::vector<MeshChannelMinute> channelMinutes;   // the last full minute of every channel (noise floor, occupancy)
     // tables (oldest first; at most 100 packets, 150 nodes, 100 messages: the oldest leave first, the node heard longest ago)
     std::vector<MeshPacket> packets;
     std::vector<MeshNode> nodes;

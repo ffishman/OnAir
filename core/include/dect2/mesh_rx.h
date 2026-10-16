@@ -31,6 +31,8 @@ public:
     void setLogCallback(std::function<void(const std::string&)> cb);   // events for the log pane; may be called from the receiver thread
     // Recording: every packet and telemetry / position report also appended to a CSV file per day in this folder ("" = off; mesh_record.h)
     void setRecordDir(const std::string& dir);
+    void setGainDb(double db);                           // the radio's fixed gain, written to the channel file (-1 unknown or automatic)
+    void setOccupancyThresholdDb(double db);             // a 1 ms window this far above the noise floor counts as occupied (6 dB)
     std::string recordStatus() const;                    // "" off, else the folder or the last error
     long long recordLines() const;                       // lines written since the start
 

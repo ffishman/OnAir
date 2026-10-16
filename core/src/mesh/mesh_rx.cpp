@@ -331,6 +331,7 @@ struct MeshReceiver::Impl {
         row.parsed = true;
         row.type = pk.type; row.from = pk.from; row.to = pk.to; row.channel = pk.channel; row.packetId = pk.packetId;
         row.hopLimit = pk.hopLimit; row.hopStart = pk.hopStart; row.decrypted = pk.decrypted; row.note = pk.note; row.detail = pk.detail;
+        row.viaMqtt = pk.viaMqtt; row.nextHop = pk.nextHop; row.relayNode = pk.relayNode;
         row.path = pk.path;
         count(proto_, pk.type.empty() ? "?" : pk.type);
         const int hops = proto_ == 1 ? (pk.hopStart > 0 && pk.hopLimit >= 0 && pk.hopStart >= pk.hopLimit ? pk.hopStart - pk.hopLimit : -1)

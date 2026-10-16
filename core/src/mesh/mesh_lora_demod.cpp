@@ -573,6 +573,7 @@ void Demod::Impl::dataSymbol(const ChanBuf& b, std::vector<RxFrame>& out) {
             return;
         }
         f.hdr = fd.header();
+        f.crcRx = fd.receivedCrc();
         f.corrected = corr;
         f.cfoHz = cfoBins * p.bwHz / N;
         f.sfoPpm = (drift + loopInt) / N * 1e6;

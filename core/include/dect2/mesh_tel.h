@@ -53,6 +53,8 @@ struct MeshPacket {
     double unixTime = 0;         // the frame's start on the computer clock (sample clock anchored to it; 0 = not known)
     double airSec = 0;           // time on air of the whole frame (preamble, header, payload, CRC)
     std::string crcHeaderHex;    // Meshtastic frame with a CRC error: its first 16 bytes (the header) in hex, NOT verified by the CRC
+    std::string crcPayloadHex;   // any frame with a CRC error: the whole payload as received, and the CRC it carried (for repairs)
+    int crcRx = -1;
     bool decrypted = false;
     std::string note;            // why not decrypted ("encrypted (direct)", "unknown channel 0x1f", "CRC error")
     std::string detail;          // one short line about the content

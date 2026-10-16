@@ -69,7 +69,9 @@ public:
     bool done() const { return hdr_.ok && n_ >= need_; }
     // after done(): the payload, whether its CRC was right, and how many codewords needed a correction
     bool finish(std::vector<uint8_t>& payload, bool& crcOk, int& corrected);
+    uint16_t receivedCrc() const { return crcRx_; }            // the CRC the frame carried (after finish(), when it has one)
 private:
+    uint16_t crcRx_ = 0;
     void block(const uint16_t* bins, int cwLen, int sfApp, bool reduced);
     int sf_ = 11, n_ = 0, need_ = 8, corrected_ = 0, hn_ = 5;   // hn_: header nibbles in front of the payload (5, or 0 implicit)
     bool ldro_ = false, implicit_ = false;
@@ -95,6 +97,7 @@ struct RxFrame {
     std::vector<uint8_t> payload;
     Header hdr;
     bool crcOk = false;
+    uint16_t crcRx = 0;          // the CRC the frame carried (to try repairs of a frame that failed it)
     int corrected = 0;           // codewords with a corrected bit
     double cfoHz = 0;            // carrier offset from the channel centre
     double sfoPpm = 0;           // clock offset measured over the frame

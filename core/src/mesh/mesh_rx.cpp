@@ -418,10 +418,13 @@ struct MeshReceiver::Impl {
             row.note = "CRC error";
             // the header of a Meshtastic frame that failed its CRC: often still right (a collision or a fade late in the frame), and
             // then it says which packet was lost (packet id, from, relay); the CRC does not vouch for it
-            if (di.protocol == 1 && f.payload.size() >= 16) {
-                static const char* hx = "0123456789abcdef";
+            static const char* hx = "0123456789abcdef";
+            if (di.protocol == 1 && f.payload.size() >= 16)
                 for (size_t i = 0; i < 16; i++) { row.crcHeaderHex += hx[f.payload[i] >> 4]; row.crcHeaderHex += hx[f.payload[i] & 15]; }
-            }
+            // the whole frame as received and the CRC it carried: copies of one packet relayed by several nodes carry the same
+            // encrypted body, so bad copies can be voted into a good one later (tools/mesh_crc_repair.py)
+            for (uint8_t b : f.payload) { row.crcPayloadHex += hx[b >> 4]; row.crcPayloadHex += hx[b & 15]; }
+            row.crcRx = f.crcRx;
             count(di.protocol, "CRC error");
             pushPacket(std::move(row));
             return;

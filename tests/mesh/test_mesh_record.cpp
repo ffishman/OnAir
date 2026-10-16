@@ -48,7 +48,7 @@ int main() {
     CHECK(lines(a) == 3 && a.rfind("unix_time,time,frequency_hz,network", 0) == 0, "packet file: header and two lines\n%s", a.c_str());
     CHECK(a.find("TEXT_MESSAGE_APP,!e326743b,Sao Jose Barreiros,^all,LongFast,,3,1,2,1,1,28.5") != std::string::npos, "packet fields\n%s", a.c_str());
     CHECK(a.find("\"Teste, com virgula\"") != std::string::npos, "detail quoted");
-    CHECK(a.find(",ac,00,1,-652,456.7,\n") != std::string::npos, "relay, next hop, via MQTT, CFO, air time\n%s", a.c_str());
+    CHECK(a.find(",ac,00,1,-652,456.7,,,\n") != std::string::npos, "relay, next hop, via MQTT, CFO, air time\n%s", a.c_str());
     CHECK(lines(b) == 2 && b.find(",Sao Jose Barreiros,28.5,87,4.050,,,,,,,-27.600000,-48.620000,0") != std::string::npos, "reading line\n%s", b.c_str());
 
     // reopened (a restart): the header is not written again
@@ -66,11 +66,11 @@ int main() {
         const fs::path old = dir / ("mesh-packets-" + dayOf(t3) + ".csv");
         { FILE* f = fopen(old.string().c_str(), "wb"); fputs("unix_time,time,frequency_hz\n1,2,3\n", f); fclose(f); }
         MeshRecorder r3; r3.setDir(dir.string());
-        MeshPacket q = p; q.crcOk = false; q.parsed = false; q.crcHeaderHex = "ffffffff3b7426e3";
+        MeshPacket q = p; q.crcOk = false; q.parsed = false; q.crcHeaderHex = "ffffffff3b7426e3"; q.crcPayloadHex = "ffffffff3b7426e3aabb"; q.crcRx = 0x12ab;
         r3.packet(q, t3, "");
         const std::string nb = slurp(dir / ("mesh-packets-" + dayOf(t3) + "-b.csv"));
         CHECK(lines(slurp(old)) == 2 && lines(nb) == 2 && nb.find("CRC error") != std::string::npos, "other layout: a -b file\n%s", nb.c_str());
-        CHECK(nb.find(",,,,-652,456.7,ffffffff3b7426e3\n") != std::string::npos, "CRC error: the unverified header, no relay fields\n%s", nb.c_str());
+        CHECK(nb.find(",,,,-652,456.7,ffffffff3b7426e3,ffffffff3b7426e3aabb,12ab\n") != std::string::npos, "CRC error: the unverified header, no relay fields\n%s", nb.c_str());
     }
     fs::remove_all(dir, ec);
     printf("mesh record: %s\n", fails ? "FAILED" : "ok");

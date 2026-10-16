@@ -95,7 +95,8 @@ bool MeshRecorder::open(double unixTime) {
     std::filesystem::create_directories(d, ec);
     pk_ = openCsv(d / (std::string("mesh-packets-") + day + ".csv"),
                   "unix_time,time,frequency_hz,network,preset,type,from,name,to,channel,packet_id,hop_start,hop_limit,hops,decrypted,crc_ok,"
-                  "snr_db,level_dbfs,sf,bw_hz,cr,bytes,detail,note,relay_node,next_hop,via_mqtt,cfo_hz,airtime_ms,crc_header_hex\n");
+                  "snr_db,level_dbfs,sf,bw_hz,cr,bytes,detail,note,relay_node,next_hop,via_mqtt,cfo_hz,airtime_ms,crc_header_hex,"
+                  "crc_payload_hex,crc_rx\n");
     rd_ = openCsv(d / (std::string("mesh-readings-") + day + ".csv"),
                   "unix_time,time,network,id,name,snr_db,battery_pct,voltage,channel_util_pct,air_util_tx_pct,uptime_s,temp_c,humidity_pct,"
                   "pressure_hpa,lat,lon,alt_m\n");
@@ -127,7 +128,9 @@ void MeshRecorder::packet(const MeshPacket& p, double unixTime, const std::strin
                     // Meshtastic header: relay_node / next_hop as the last byte of the node number in hex (who sent this copy, who should send
                     // it on), via_mqtt; the measured carrier offset; the frame's time on air; the unverified header of a frame with a CRC error
                     (mt && p.relayNode >= 0 ? fmt2x(p.relayNode) : "") + "," + (mt && p.nextHop >= 0 ? fmt2x(p.nextHop) : "") + "," +
-                    (mt ? (p.viaMqtt ? "1" : "0") : "") + "," + fmt("%.0f", p.cfoHz) + "," + fmt("%.1f", p.airSec * 1000) + "," + p.crcHeaderHex + "\n";
+                    (mt ? (p.viaMqtt ? "1" : "0") : "") + "," + fmt("%.0f", p.cfoHz) + "," + fmt("%.1f", p.airSec * 1000) + "," + p.crcHeaderHex + "," +
+                    // a frame with a CRC error: all of it as received and the CRC it carried (four hex digits)
+                    p.crcPayloadHex + "," + (p.crcRx >= 0 ? fmt2x(p.crcRx >> 8) + fmt2x(p.crcRx) : std::string()) + "\n";
     fputs(s.c_str(), pk_);
     fflush(pk_);
     lines_++;

@@ -205,7 +205,7 @@ void FrameDecoder::push(uint16_t bin) {
 }
 
 bool FrameDecoder::finish(std::vector<uint8_t>& payload, bool& crcOk, int& corrected) {
-    payload.clear(); crcOk = false;
+    payload.clear(); crcOk = false; crcRx_ = 0;
     if (!done()) return false;
     const int sfApp = ldro_ ? sf_ - 2 : sf_;
     for (int at = 8; at + hdr_.cr <= n_; at += hdr_.cr) block(bins_.data() + at, hdr_.cr, sfApp, ldro_);
@@ -217,6 +217,7 @@ bool FrameDecoder::finish(std::vector<uint8_t>& payload, bool& crcOk, int& corre
         const size_t c = (size_t)hn_ + 2 * len;
         const uint16_t got = (uint16_t)(nib_[c] | nib_[c + 1] << 4 | nib_[c + 2] << 8 | nib_[c + 3] << 12);
         crcOk = got == payloadCrc(payload.data(), len);
+        crcRx_ = got;
     }
     corrected = corrected_;
     return true;

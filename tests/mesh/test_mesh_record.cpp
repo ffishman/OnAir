@@ -33,6 +33,7 @@ int main() {
     MeshRecorder r;
     MeshPacket p; p.protocol = 1; p.crcOk = true; p.type = "TEXT_MESSAGE_APP"; p.from = "!e326743b"; p.to = "^all"; p.channel = "LongFast";
     p.hopStart = 3; p.hopLimit = 1; p.decrypted = true; p.snrDb = 28.5f; p.freqHz = 919875000; p.detail = "Teste, com virgula";
+    p.parsed = true; p.relayNode = 0xac; p.nextHop = 0; p.viaMqtt = true; p.cfoHz = -652.4; p.airSec = 0.4567;
     const double t1 = 1792000000.0;
     r.packet(p, t1, "Sao Jose Barreiros");                      // off: nothing
     CHECK(!fs::exists(dir) && r.status().empty(), "nothing while off");
@@ -47,6 +48,7 @@ int main() {
     CHECK(lines(a) == 3 && a.rfind("unix_time,time,frequency_hz,network", 0) == 0, "packet file: header and two lines\n%s", a.c_str());
     CHECK(a.find("TEXT_MESSAGE_APP,!e326743b,Sao Jose Barreiros,^all,LongFast,,3,1,2,1,1,28.5") != std::string::npos, "packet fields\n%s", a.c_str());
     CHECK(a.find("\"Teste, com virgula\"") != std::string::npos, "detail quoted");
+    CHECK(a.find(",ac,00,1,-652,456.7,\n") != std::string::npos, "relay, next hop, via MQTT, CFO, air time\n%s", a.c_str());
     CHECK(lines(b) == 2 && b.find(",Sao Jose Barreiros,28.5,87,4.050,,,,,,,-27.600000,-48.620000,0") != std::string::npos, "reading line\n%s", b.c_str());
 
     // reopened (a restart): the header is not written again
@@ -58,6 +60,18 @@ int main() {
     r2.packet(p, t1 + 86400, "");
     CHECK(fs::exists(dir / ("mesh-packets-" + dayOf(t1 + 86400) + ".csv")) && lines(slurp(pk)) == 4, "a file per day");
     CHECK(r2.linesWritten() == 2 && r2.status() == dir.string(), "status");
+    // a day file started by a build with other columns: this one goes on in a "-b" file beside it, the old one untouched
+    {
+        const double t3 = t1 + 2 * 86400;
+        const fs::path old = dir / ("mesh-packets-" + dayOf(t3) + ".csv");
+        { FILE* f = fopen(old.string().c_str(), "wb"); fputs("unix_time,time,frequency_hz\n1,2,3\n", f); fclose(f); }
+        MeshRecorder r3; r3.setDir(dir.string());
+        MeshPacket q = p; q.crcOk = false; q.parsed = false; q.crcHeaderHex = "ffffffff3b7426e3";
+        r3.packet(q, t3, "");
+        const std::string nb = slurp(dir / ("mesh-packets-" + dayOf(t3) + "-b.csv"));
+        CHECK(lines(slurp(old)) == 2 && lines(nb) == 2 && nb.find("CRC error") != std::string::npos, "other layout: a -b file\n%s", nb.c_str());
+        CHECK(nb.find(",,,,-652,456.7,ffffffff3b7426e3\n") != std::string::npos, "CRC error: the unverified header, no relay fields\n%s", nb.c_str());
+    }
     fs::remove_all(dir, ec);
     printf("mesh record: %s\n", fails ? "FAILED" : "ok");
     return fails ? 1 : 0;

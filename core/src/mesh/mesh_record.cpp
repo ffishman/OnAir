@@ -22,8 +22,30 @@ std::tm localOf(double unixTime) {
 std::string fmt(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
 std::string opt(double v, const char* f) { return v < 0 ? std::string() : fmt(f, v); }
 
-FILE* openCsv(const std::filesystem::path& p, const char* header) {
+// the first line of a file (its header), "" when there is none
+std::string firstLine(const std::filesystem::path& p) {
+#ifdef _WIN32
+    FILE* f = _wfopen(p.c_str(), L"rb");
+#else
+    FILE* f = fopen(p.c_str(), "rb");
+#endif
+    if (!f) return "";
+    std::string s;
+    for (int c; (c = fgetc(f)) != EOF && c != '\n';) s += (char)c;
+    fclose(f);
+    return s + "\n";
+}
+
+// The day's file, or when it was started by a build with other columns, the next free "-b", "-c" ... one beside it (a file keeps
+// one header: lines of two layouts under one header would be read wrongly)
+FILE* openCsv(std::filesystem::path p, const char* header) {
     std::error_code ec;
+    for (char suffix = 'b'; suffix <= 'z'; suffix++) {
+        if (!std::filesystem::exists(p, ec) || std::filesystem::file_size(p, ec) == 0 || firstLine(p) == header) break;
+        std::string stem = p.stem().string();
+        if (suffix > 'b') stem.resize(stem.size() - 2);
+        p.replace_filename(stem + "-" + suffix + ".csv");
+    }
     const bool fresh = !std::filesystem::exists(p, ec) || std::filesystem::file_size(p, ec) == 0;
 #ifdef _WIN32
     FILE* f = _wfopen(p.c_str(), L"ab");
@@ -72,7 +94,7 @@ bool MeshRecorder::open(double unixTime) {
     std::filesystem::create_directories(d, ec);
     pk_ = openCsv(d / (std::string("mesh-packets-") + day + ".csv"),
                   "unix_time,time,frequency_hz,network,preset,type,from,name,to,channel,packet_id,hop_start,hop_limit,hops,decrypted,crc_ok,"
-                  "snr_db,level_dbfs,sf,bw_hz,cr,bytes,detail,note\n");
+                  "snr_db,level_dbfs,sf,bw_hz,cr,bytes,detail,note,relay_node,next_hop,via_mqtt,cfo_hz,airtime_ms,crc_header_hex\n");
     rd_ = openCsv(d / (std::string("mesh-readings-") + day + ".csv"),
                   "unix_time,time,network,id,name,snr_db,battery_pct,voltage,channel_util_pct,air_util_tx_pct,uptime_s,temp_c,humidity_pct,"
                   "pressure_hpa,lat,lon,alt_m\n");
@@ -89,13 +111,19 @@ void MeshRecorder::packet(const MeshPacket& p, double unixTime, const std::strin
     char ts[24];
     std::strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", &l);
     const int hops = p.hopStart > 0 && p.hopLimit >= 0 && p.hopStart >= p.hopLimit ? p.hopStart - p.hopLimit : -1;
+    const bool mt = p.protocol == 1 && p.parsed;
+    auto fmt2x = [](int v) { char b[8]; snprintf(b, sizeof b, "%02x", v & 0xFF); return std::string(b); };
     std::string s = fmt("%.3f", unixTime) + "," + ts + "," + fmt("%.0f", p.freqHz) + "," + protoLabel(p.protocol) + "," + meshCsvField(p.preset) + "," +
                     meshCsvField(p.crcOk ? p.type : "CRC error") + "," + meshCsvField(p.from) + "," + meshCsvField(name) + "," + meshCsvField(p.to) + "," +
                     meshCsvField(p.channel) + "," + (p.packetId ? fmt("%.0f", (double)p.packetId) : "") + "," +
                     (p.hopStart >= 0 ? std::to_string(p.hopStart) : "") + "," + (p.hopLimit >= 0 ? std::to_string(p.hopLimit) : "") + "," +
                     (hops >= 0 ? std::to_string(hops) : "") + "," + (p.decrypted ? "1" : "0") + "," + (p.crcOk ? "1" : "0") + "," +
                     fmt("%.1f", p.snrDb) + "," + fmt("%.1f", p.levelDb) + "," + std::to_string(p.sf) + "," + fmt("%.0f", p.bwHz) + "," +
-                    std::to_string(p.cr) + "," + std::to_string(p.size) + "," + meshCsvField(p.detail) + "," + meshCsvField(p.note) + "\n";
+                    std::to_string(p.cr) + "," + std::to_string(p.size) + "," + meshCsvField(p.detail) + "," + meshCsvField(p.note) + "," +
+                    // Meshtastic header: relay_node / next_hop as the last byte of the node number in hex (who sent this copy, who should send
+                    // it on), via_mqtt; the measured carrier offset; the frame's time on air; the unverified header of a frame with a CRC error
+                    (mt && p.relayNode >= 0 ? fmt2x(p.relayNode) : "") + "," + (mt && p.nextHop >= 0 ? fmt2x(p.nextHop) : "") + "," +
+                    (mt ? (p.viaMqtt ? "1" : "0") : "") + "," + fmt("%.0f", p.cfoHz) + "," + fmt("%.1f", p.airSec * 1000) + "," + p.crcHeaderHex + "\n";
     fputs(s.c_str(), pk_);
     fflush(pk_);
     lines_++;

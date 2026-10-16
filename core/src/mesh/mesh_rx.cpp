@@ -160,6 +160,18 @@ struct MeshReceiver::Impl {
 
     static double wallNow() { return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count(); }
 
+    // The packet's time on the computer clock: the sample clock (exact between two packets, to the sample) plus an offset to the
+    // computer clock. The offset is the smallest wall - sample difference seen (the least processing delay); it moves on when the
+    // stream stalled or lost samples (the difference grew by more than half a second). Before, the list took the time from the
+    // last samples received, so a stalled stream moved every packet by the length of the stall.
+    double wallOffset = 0;
+    bool wallAnchored = false;
+    double frameUnixTime(double sampleSec) {
+        const double off = wallNow() - now();
+        if (!wallAnchored || off < wallOffset || off - wallOffset > 0.5) { wallOffset = off; wallAnchored = true; }
+        return wallOffset + sampleSec;
+    }
+
     // every packet goes to the list (the last kPacketCap) and, when recording, to the day's file
     void pushPacket(MeshPacket&& row) {
         std::string name;
@@ -167,7 +179,8 @@ struct MeshReceiver::Impl {
             auto it = nodeIdx.find(std::to_string(row.protocol) + "|" + row.from);
             if (it != nodeIdx.end()) name = tel.nodes[it->second].longName;
         }
-        rec.packet(row, wallNow(), name);
+        row.unixTime = frameUnixTime(row.timeSec);
+        rec.packet(row, row.unixTime, name);
         capPush(tel.packets, std::move(row), kPacketCap);
     }
 
@@ -306,8 +319,18 @@ struct MeshReceiver::Impl {
         row.sf = di.sf; row.cr = f.hdr.cr; row.bwHz = di.bwHz;
         row.levelDb = (float)f.levelDb; row.snrDb = (float)f.snrDb;
         row.size = (int)f.payload.size(); row.crcOk = f.crcOk;
+        {
+            lora::Params lp; lp.sf = di.sf; lp.bwHz = di.bwHz; lp.cr = f.hdr.cr; lp.preamble = di.preamble; lp.ldro = di.ldro; lp.crc = f.hdr.crc;
+            row.airSec = lora::airSeconds(lp, f.payload.size());
+        }
         if (!good) {
             row.note = "CRC error";
+            // the header of a Meshtastic frame that failed its CRC: often still right (a collision or a fade late in the frame), and
+            // then it says which packet was lost (packet id, from, relay); the CRC does not vouch for it
+            if (di.protocol == 1 && f.payload.size() >= 16) {
+                static const char* hx = "0123456789abcdef";
+                for (size_t i = 0; i < 16; i++) { row.crcHeaderHex += hx[f.payload[i] >> 4]; row.crcHeaderHex += hx[f.payload[i] & 15]; }
+            }
             count(di.protocol, "CRC error");
             pushPacket(std::move(row));
             return;

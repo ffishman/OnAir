@@ -1,6 +1,7 @@
 // Headless receiver: prints sync / L1 telemetry once per second. Useful for bring-up and logs.
 //   dect2cli --hackrf [--freq MHz] [--lna dB] [--vga dB] [--amp] [--bw MHz] [--secs N]
 //   dect2cli --file path.cs8 --rate Msps [--format cs8|cu8|cf32] [--bw MHz] [--secs N]   (--secs 0: run until stopped)
+//   dect2cli ... --net-radio rtltcp,192.168.2.197,1234   (a radio on the network instead of the first one plugged in)
 //   dect2cli --standard meshtastic --freq 919.875 --mesh-region anz --mesh-record ~/mesh-log --secs 0   (Mesh: every packet and
 //     telemetry / position report appended to mesh-packets-YYYY-MM-DD.csv and mesh-readings-YYYY-MM-DD.csv; tools/mesh_log_report.py reads them)
 //   dect2cli ... --record out.cs8|out.cf32|folder|auto --secs N   (any radio or --synthetic, not --file: saves the radio's raw samples at its own
@@ -25,6 +26,7 @@
 #include "dect2/channel.h"
 #include "dect2/quality.h"
 #include "dect2/nettuner.h"
+#include "dect2/netradio.h"
 #include "dect2/platform.h"
 #include "dect2/timecompat.h"
 #include <algorithm>
@@ -62,6 +64,7 @@ int main(int argc, char** argv) {
     bool useFile = false, haveDev = false, synthetic = false, listen = false, atvFm = false;
     bool dpmrScan = false;
     std::string meshRecord; int meshRegion = -1;
+    std::string netRadio;   // --net-radio: a radio on the network, as the settings keep it ("rtltcp,host,port"); used instead of the first one found
     double dvbcSr = 0; int dvbcQam = 0; bool dvbcAnnexC = false;
     int orbcommMax = 2;
     double refLat = 0, refLon = 0; bool haveRef = false;
@@ -82,6 +85,7 @@ int main(int argc, char** argv) {
         else if (a == "--ble-channel") { freq = dect2::ble::channelMhz(atoi(next())); freqSet = true; }   // with --standard ble: advertising channel 37, 38 or 39
         else if (a == "--dvbc-sr") dvbcSr = atof(next()) * 1e6;   // with --standard dvbc: a manual symbol rate in Msym/s (default: measured)
         else if (a == "--dvbc-qam") dvbcQam = atoi(next());       // with --standard dvbc: 16, 32, 64, 128 or 256 (default: found from the stream)
+        else if (a == "--net-radio") netRadio = next();         // e.g. rtltcp,192.168.2.197,1234 (any type the app's "Add network radio" takes)
         else if (a == "--mesh-record") meshRecord = next();   // Mesh: every packet and report to CSV files in this folder, one pair a day
         else if (a == "--mesh-region") { const std::string v = next(); meshRegion = v == "us" ? 1 : v == "anz" ? 2 : 0; }   // Mesh band plan: eu (default), us, anz
         else if (a == "--dpmr-scan") dpmrScan = true;           // with --standard dpmr: scan the 16 PMR446 channels (tune to one of them)
@@ -156,7 +160,19 @@ int main(int argc, char** argv) {
     else if (synthetic) { dev.kind = DeviceInfo::Synthetic; dev.name = "synthetic"; }
     else {
         std::string err;
+        std::string want;   // the list entry of the --net-radio radio
+        if (!netRadio.empty()) {
+            const auto nr = netRadiosFromString(netRadio);
+            if (nr.size() != 1) { fprintf(stderr, "--net-radio: expected one radio as type,host,port (rtltcp,192.168.2.197,1234), got \"%s\"\n", netRadio.c_str()); return 1; }
+            setNetworkRadios(nr);
+            want = netRadioDeviceName(nr[0]);
+        }
         auto list = listRadios(err);
+        if (!want.empty()) {
+            auto it = std::find_if(list.begin(), list.end(), [&](const DeviceInfo& d) { return d.name == want; });
+            if (it == list.end()) { fprintf(stderr, "--net-radio: %s is not in the radio list %s\n", want.c_str(), err.c_str()); return 1; }
+            list = {*it};
+        }
         if (list.empty()) { fprintf(stderr, "no radio found (HackRF or SoapySDR) %s\n", err.c_str()); return 1; }
         dev = list[0];
         printf("device: %s\n", dev.name.c_str());

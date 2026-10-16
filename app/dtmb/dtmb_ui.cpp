@@ -131,6 +131,9 @@ void status(App& a) {
         ro("cw dropped/skipped", b, t.cwDropped ? kWarn : kText);
     }
     if (run && a.devices[a.devIdx].kind != DeviceInfo::File) {
+        // the warning gets a line of its own: squeezed in after the last group of the row it wrapped into a column a letter or two
+        // wide at the window edge, which showed as a blank strip several lines tall under the status line
+        if (adc == AdcStatus::Overload || adc == AdcStatus::Low || adc == AdcStatus::NoSignal) flowBreak();
         ImGui::AlignTextToFramePadding();
         if (adc == AdcStatus::Overload) { ImGui::PushTextWrapPos(0); ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.25f, 1), "ADC OVERLOAD - %s", a.agcOn ? "AGC is lowering the gain" : "reduce the gain (or enable AGC)"); ImGui::PopTextWrapPos(); }
         else if (adc == AdcStatus::Low) { ImGui::PushTextWrapPos(0); ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.15f, 1), "ADC level low - raise the gain"); ImGui::PopTextWrapPos(); }

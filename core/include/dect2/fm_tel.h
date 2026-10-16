@@ -24,6 +24,7 @@ struct FmTelemetry {
 
     // RDS contents (empty until received)
     std::string psName;         // programme service name, 8 characters
+    std::string psConfirmed;    // the same name once its 8 characters came twice in a row (of a scrolling name: never a window mixed from two steps)
     std::string radioText;      // radio text, up to 64 characters
     bool radioTextComplete = false;   // every segment of the radio text received (not only a part of it)
     std::string ptyText;        // programme type

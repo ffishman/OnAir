@@ -66,6 +66,7 @@ static void checkStation(const Run& r, const char* what, bool rds) {
     if (rds) {
         CHECK(t.rdsSync, "%s: no RDS synchronisation", what);
         CHECK(t.psName == "TESTFM  ", "%s: station name '%s'", what, t.psName.c_str());
+        CHECK(t.psConfirmed == "TESTFM  ", "%s: confirmed station name '%s'", what, t.psConfirmed.c_str());
         CHECK(t.radioText == "OnAir FM test signal", "%s: radio text '%s'", what, t.radioText.c_str());
         CHECK(t.radioTextComplete, "%s: radio text not complete", what);
         CHECK(t.piCode == 0x4A21, "%s: PI %04X", what, t.piCode);

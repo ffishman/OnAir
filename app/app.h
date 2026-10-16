@@ -380,8 +380,12 @@ struct App {
         bool running = false; int phase = 0; int idx = -1; double t0 = 0, savedFreq = 100.0; uint64_t seq0 = 0, rxSeq0 = 0;   // seq0: spectrum frame, rxSeq0: receiver report at the moment of tuning; phase 0 surveys the band, phase 1 checks each candidate
         std::vector<double> cand;
         std::vector<std::string> psSeq; double psT = 0;   // the names the station sent on this channel, in order, and when the last new one came
+        std::string bestName, bestRt; int bestPi = 0;     // the last confirmed name, the longest radio text and the PI seen on this channel (the receiver may lose them before the end)
         // rt: radio text; psText: the names of a station whose name changes (a scrolling name), in order; pi: programme identification
-        struct Res { std::string name, pty; double mhz = 0; bool found = false, stereo = false, rds = false; float snr = 0; std::string rt, psText; int pi = 0; bool tp = false; };
+        // levelDbfs: ADC level of the whole captured band (rms; the channel power after the filters sits near 0 dBFS and says little); blockOkPct: RDS blocks with a good checkword; nameConfirmed: the name came twice (or a scrolling name
+        // came round); listenSec: time spent on the channel; gainDb and radio: what the scan ran with, so two scans can be compared
+        struct Res { std::string name, pty; double mhz = 0; bool found = false, stereo = false, rds = false; float snr = 0; std::string rt, psText; int pi = 0; bool tp = false;
+                     bool ta = false, nameConfirmed = false; float levelDbfs = -120, blockOkPct = 0, listenSec = 0; double gainDb = 0; std::string radio; };
         std::vector<Res> results;
     } fmScan;
     std::vector<FmSavedStation> fmSaved;   // stations the user saved by hand, kept in the preferences between sessions

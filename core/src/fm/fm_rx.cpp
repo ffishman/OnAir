@@ -174,6 +174,8 @@ struct RdsDecoder {
     char psBuf[9] = "        ";
     uint8_t psSeen = 0;
     std::string ps, rt;
+    std::string psConfirmed;      // a name window that came twice among the last few (psRecent)
+    std::string psRecent[6]; int psRecentN = 0;
     char rtBuf[65] = {};
     int rtAb = -1;
     uint16_t rtSeen = 0;          // the radio text segments received since the A/B flag last changed
@@ -238,7 +240,15 @@ struct RdsDecoder {
             if ((psSeen >> seg & 1) && (psBuf[seg * 2] != c0 || psBuf[seg * 2 + 1] != c1)) psSeen = 0;
             psBuf[seg * 2] = c0; psBuf[seg * 2 + 1] = c1;
             psSeen |= (uint8_t)(1 << seg);
-            if (psSeen == 15) { ps.assign(psBuf, 8); psSeen = 0; }
+            if (psSeen == 15) {
+                // a scrolling name can still give one mixed window (the first segments of one step, the last of the next, when the step
+                // changed before any segment came again); a window that comes again is a real one. Not only twice in a row: a name sent
+                // in pages ("NOSTAL", "GIA") may give each page once per round, and the first page then never confirmed
+                ps.assign(psBuf, 8); psSeen = 0;
+                for (int i = 0; i < psRecentN; i++) if (psRecent[i] == ps) { psConfirmed = ps; break; }
+                for (int i = std::min(psRecentN, 5); i > 0; i--) psRecent[i] = psRecent[i - 1];
+                psRecent[0] = ps; psRecentN = std::min(psRecentN + 1, 6);
+            }
         } else if (type == 3 && ver == 0 && ok[2]) {
             tmc.onGroup3A((uint16_t)low, info[2], info[3]);
         } else if (type == 8 && ver == 0 && ok[2]) {
@@ -261,7 +271,9 @@ struct RdsDecoder {
                 const uint16_t need = (uint16_t)((2u << last) - 1);
                 rtComplete = (rtSeen & need) == need;
             }
-            std::string s(rtBuf, 64);
+            int have = 0;   // the text up to the first segment not received yet (a gap would show as spaces or another text's characters)
+            while (have < 16 && (rtSeen >> have & 1)) have++;
+            std::string s(rtBuf, (size_t)(have * (ver == 0 ? 4 : 2)));
             const size_t cr = s.find('\r');
             if (cr != std::string::npos) s.resize(cr);
             while (!s.empty() && s.back() == ' ') s.pop_back();
@@ -721,7 +733,7 @@ struct FmReceiver::Impl {
         t.rdsSync = rds.synced;
         t.rdsBlockOkPct = rds.okPct;
         t.rdsGroups = rds.groups;
-        t.psName = rds.ps; t.radioText = rds.rt; t.radioTextComplete = rds.rtComplete; t.ptyText = rds.groups ? kPtyNames[rds.pty & 31] : "";
+        t.psName = rds.ps; t.psConfirmed = rds.psConfirmed; t.radioText = rds.rt; t.radioTextComplete = rds.rtComplete; t.ptyText = rds.groups ? kPtyNames[rds.pty & 31] : "";
         t.tmc = rds.tmc.system();
         t.tmcMessages = rds.tmc.messages(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count());
         t.trafficAlert = rds.ta; t.trafficProgram = rds.tp; t.music = rds.ms; t.piCode = rds.groups ? rds.pi : 0;

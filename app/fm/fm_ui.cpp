@@ -94,11 +94,20 @@ void fmStatus(App& a) {
         if (!ps.empty()) ro("Station", ps);
     }
     flowBreak();
-    if (live && fm.state >= 1) {
-        snprintf(b, sizeof b, "%.1f dB", fm.snrDb); ro("SNR", b);
-        snprintf(b, sizeof b, "%.0f kHz", fm.devKhz); ro("Deviation", b, fm.devKhz > 80 ? ImVec4(0.95f, 0.70f, 0.15f, 1) : ImVec4(0.93f, 0.95f, 0.97f, 1));
-        if (fm.stereo) { snprintf(b, sizeof b, "%.1f %%", fm.pilotPct); ro("Pilot", b); }
-        snprintf(b, sizeof b, "%+.0f Hz", fm.cfoHz); ro("Offset", b);
+    // the same groups in every frame ("-" while there is no station): the row wraps by the widths of last frame's groups, and a group
+    // that came and went (each retune of a scan) shifted them, which left a blank line under the status for a moment
+    if (run) {
+        const bool on = live && fm.state >= 1;
+        const ImVec4 dim(0.6f, 0.64f, 0.68f, 1);
+        const ImVec4 fg(0.93f, 0.95f, 0.97f, 1);
+        if (on) snprintf(b, sizeof b, "%.1f dB", fm.snrDb); else snprintf(b, sizeof b, "-");
+        ro("SNR", b, on ? fg : dim);
+        if (on) snprintf(b, sizeof b, "%.0f kHz", fm.devKhz); else snprintf(b, sizeof b, "-");
+        ro("Deviation", b, !on ? dim : fm.devKhz > 80 ? ImVec4(0.95f, 0.70f, 0.15f, 1) : fg);
+        if (on && fm.stereo) snprintf(b, sizeof b, "%.1f %%", fm.pilotPct); else snprintf(b, sizeof b, "-");
+        ro("Pilot", b, on && fm.stereo ? fg : dim);
+        if (on) snprintf(b, sizeof b, "%+.0f Hz", fm.cfoHz); else snprintf(b, sizeof b, "-");
+        ro("Offset", b, on ? fg : dim);
     }
     if (run) { snprintf(b, sizeof b, "%.3f Msps", a.engine.sampleRate() / 1e6); ro("fs", b); }
     ImGui::AlignTextToFramePadding();
@@ -123,6 +132,9 @@ void fmStatus(App& a) {
     flowNext(15 * gUi);
     if (run) { const SampleLoss l = a.engine.sampleLoss(); ro("dropped", lossText(l), lossColour(l)); lossTooltip(l); }
     if (run && a.devices[a.devIdx].kind != DeviceInfo::File) {
+        // the warning gets a line of its own: squeezed in after the last group of the row it wrapped into a column a letter or two
+        // wide at the window edge, which showed as a blank strip several lines tall under the status line
+        if (adc == AdcStatus::Overload || adc == AdcStatus::Low || adc == AdcStatus::NoSignal) flowBreak();
         ImGui::AlignTextToFramePadding();
         if (adc == AdcStatus::Overload) { ImGui::PushTextWrapPos(0); ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.25f, 1), "ADC OVERLOAD - %s", a.agcOn ? "AGC is lowering the gain" : "reduce the gain (strong FM stations nearby)"); ImGui::PopTextWrapPos(); }
         else if (adc == AdcStatus::Low) { ImGui::PushTextWrapPos(0); ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.15f, 1), "ADC level low - raise the gain"); ImGui::PopTextWrapPos(); }
@@ -500,11 +512,15 @@ static size_t fmScrollShift(const std::string& p, const std::string& w) {   // h
 }
 static std::string fmJoinScroll(const std::vector<std::string>& seq, bool cyclic) {
     std::string text;
+    bool moved = false;   // a name scrolled a few characters at a time (not one sent a word at a time)
     for (size_t i = 0; i < seq.size(); i++) {
         const size_t shift = i ? fmScrollShift(seq[i - 1], seq[i]) : 0;
         text += shift ? seq[i].substr(8 - shift) : (i ? " " : "") + seq[i];
+        moved = moved || shift;
     }
-    if (cyclic && seq.size() >= 2) {
+    // a name sent a word at a time keeps the order it came in (from the first word seen): the gaps between its words say nothing about
+    // where the round starts ("EM BUSCA" "DO AMOR" came out as "BUSCA DO AMOR EM")
+    if (cyclic && moved && seq.size() >= 2) {
         if (const size_t k = fmScrollShift(seq.back(), seq.front())) text.resize(text.size() - (8 - k));
         else text += ' ';
         // one round has no start of its own: begin after the longest gap, which stations leave between two rounds of the text
@@ -595,11 +611,14 @@ void fmScanTab(App& a) {
     ImGui::Spacing();
     {
         static std::string note;
-        resexp::Table t; t.cols = {"time", "frequency_hz", "mode", "station", "type", "snr_db", "sound", "rds", "pi", "radio_text", "names"};
+        resexp::Table t; t.cols = {"time", "frequency_hz", "mode", "station", "type", "snr_db", "sound", "rds", "pi", "radio_text", "names",
+                                   "adc_dbfs", "rds_blocks_ok_pct", "tp", "ta", "name_confirmed", "listen_s", "gain_db", "radio"};
         const std::string now = resexp::stamp();
         for (const auto& r : s.results) if (r.found) {
             char pi[8] = ""; if (r.pi) snprintf(pi, sizeof pi, "%04X", r.pi);
-            t.add({now, resexp::num(r.mhz * 1e6, 0), "FM", r.name, r.pty, resexp::num(r.snr, 0), r.stereo ? "stereo" : "mono", r.rds ? "yes" : "no", pi, r.rt, r.psText});
+            t.add({now, resexp::num(r.mhz * 1e6, 0), "FM", r.name, r.pty, resexp::num(r.snr, 0), r.stereo ? "stereo" : "mono", r.rds ? "yes" : "no", pi, r.rt, r.psText,
+                   resexp::num(r.levelDbfs, 1), resexp::num(r.blockOkPct, 0), r.tp ? "yes" : "no", r.ta ? "yes" : "no", r.nameConfirmed ? "yes" : "no",
+                   resexp::num(r.listenSec, 1), resexp::num(r.gainDb, 1), r.radio});
         }
         resexp::saveButton(t, "fm", note, "svfm");
         if (!note.empty()) { ImGui::SameLine(); ImGui::TextDisabled("%s", note.c_str()); }
@@ -647,8 +666,22 @@ void fmScanStep(App& a) {
         s.seq0 = a.lastSeq;
         s.rxSeq0 = a.rx.seq;
         s.psSeq.clear(); s.psT = now;
+        s.bestName.clear(); s.bestRt.clear(); s.bestPi = 0;
     };
     auto finish = [&]() {
+        // the same PI on two channels: the weaker one is most likely an image of the stronger (intermodulation, or the next channel
+        // heard through a strong one), or a relay of the same network
+        for (auto& r : s.results) {
+            if (!r.found || r.pi == 0) continue;
+            for (const auto& o : s.results) {
+                if (&o == &r || !o.found || o.pi != r.pi) continue;
+                if (o.snr > r.snr || (o.snr == r.snr && o.mhz < r.mhz)) {
+                    char b[64]; snprintf(b, sizeof b, "same PI as %.1f MHz (image?)", o.mhz);
+                    r.pty = b;
+                    break;
+                }
+            }
+        }
         s.running = false;
         a.freqMhz = s.savedFreq; a.tune.centerHz = a.freqMhz * 1e6; a.engine.retuneReset(a.tune);
         size_t n = 0; for (const auto& r : s.results) if (r.found) n++;
@@ -685,12 +718,17 @@ void fmScanStep(App& a) {
     if (!fresh && dwell < 3.0) return;   // no fresh telemetry yet
     const bool station = fresh && fm.carrier && fm.state >= 1;
     const bool nameKnown = station && !fmTrim(fm.psName).empty();
+    if (station) {   // keep what came: a sync drop or a receiver reset late in the dwell must not blank the result
+        if (!fmTrim(fm.psConfirmed).empty()) s.bestName = fm.psConfirmed;
+        if (fmTrim(fm.radioText).size() > fmTrim(s.bestRt).size()) s.bestRt = fm.radioText;
+        if (fm.piCode != 0) s.bestPi = fm.piCode;
+    }
     bool done = !station ? dwell > 1.4 : (nameKnown && dwell > 1.6) || dwell > 5.0;
     if (station && fmScanFullRds()) {
         // full RDS: stay while the station sends RDS, until the name has come round (a scrolling name: back to the first one; a fixed
         // name: unchanged for 4 s), the radio text is whole (or none came in 6 s) and the PI is known; never longer than 12 s, or 30 s
         // while a scrolling name has not come round yet (a name scrolled a letter at a time takes one window per letter)
-        std::string ps = fm.psName;   // the whole 8-character window: the spaces tell how far a scrolling name moved
+        std::string ps = fm.psConfirmed;   // the whole 8-character window, once it came twice (a mixed window breaks the joining)
         ps.resize(8, ' ');
         if (!fmTrim(ps).empty() && (s.psSeq.empty() || ps != s.psSeq.back()) && fmScrollCycle(s.psSeq).empty() && s.psSeq.size() < 64) {
             s.psSeq.push_back(ps);   // until a window comes again: then the cycle is complete
@@ -701,19 +739,25 @@ void fmScanStep(App& a) {
         const bool nameDone = cycled || (s.psSeq.size() == 1 && now - s.psT > 4.0);
         const bool rtDone = fm.radioTextComplete || (fm.radioText.empty() && dwell > 6.0);
         const bool rdsDone = nameDone && rtDone && fm.piCode != 0;
-        done = (!fm.rdsSync && dwell > 2.5) || (fm.rdsSync && rdsDone) || dwell > (scrolling && fm.rdsSync ? 30.0 : 12.0);
+        // RDS sync drops for a moment on weaker stations: once a PI or a name came, ride it out (up to the cap) instead of leaving
+        const bool rdsSeen = fm.piCode != 0 || !fmTrim(fm.psName).empty();
+        done = (!fm.rdsSync && !rdsSeen && dwell > 2.5) || rdsDone || dwell > (scrolling ? 30.0 : 12.0);
     }
     if (!done) return;
     App::FmScan::Res r;
     r.mhz = s.cand[(size_t)s.idx];
     r.found = station;
     if (station) {
-        r.snr = fm.snrDb; r.stereo = fm.stereo; r.rds = fm.rdsSync; r.name = fmTrim(fm.psName); r.pty = fm.ptyText == "None" ? "" : fm.ptyText;
-        r.pi = fm.piCode; r.tp = fm.trafficProgram; r.rt = fmTrim(fm.radioText);
+        r.snr = fm.snrDb; r.stereo = fm.stereo; r.rds = fm.rdsSync; r.name = fmTrim(!fm.psConfirmed.empty() ? fm.psConfirmed : !s.bestName.empty() ? s.bestName : fm.psName); r.pty = fm.ptyText == "None" ? "" : fm.ptyText;
+        r.pi = fm.piCode != 0 ? fm.piCode : s.bestPi; r.tp = fm.trafficProgram; r.ta = fm.trafficAlert;
+        r.levelDbfs = a.spec.stats.rmsDbfs; r.blockOkPct = fm.rdsBlockOkPct; r.listenSec = (float)dwell; r.gainDb = a.tune.gainDb; r.radio = a.gainDev;
+        r.nameConfirmed = !fm.psConfirmed.empty() || !s.bestName.empty();
+        r.rt = fmTrim(fm.radioTextComplete || fmTrim(fm.radioText).size() >= fmTrim(s.bestRt).size() ? fm.radioText : s.bestRt);
         if (s.psSeq.size() >= 2) {   // a scrolling name: its whole text once is the station's name; the windows as sent in psText
             std::vector<std::string> seq = fmScrollCycle(s.psSeq);
             const bool round = !seq.empty();
             if (!round) seq = s.psSeq;   // did not come round in time
+            r.nameConfirmed = round;
             r.name = fmJoinScroll(seq, round);
             for (const auto& w : seq) r.psText += (r.psText.empty() ? "'" : " '") + w + "'";
             a.engine.log("FM scan: " + fmStationLabel(r) + " scrolling name, windows " + r.psText);

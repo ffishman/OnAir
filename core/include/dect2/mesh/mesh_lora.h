@@ -84,6 +84,7 @@ struct TxFrame {
     Params p;
     std::vector<uint16_t> data;  // encode() output
     double startSec = 0, freqHz = 0, sroPpm = 0;
+    double driftHz = 0;          // the carrier moves linearly by this much from the start to the end of the frame (a warming transmitter)
     float amp = 0.3f;
     double phase0 = 0;           // carrier phase at the start, cycles
     double endSec() const;

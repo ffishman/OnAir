@@ -1,5 +1,5 @@
 // Mesh (LoRa) under impairments, at the LoRa layer: carrier offset +-20 kHz (869 MHz: radio and node crystals), clock offset +-50 ppm
-// (and +-30 ppm on SF12), 8-bit samples, a DC offset, a 20 ms gap, a reset in the middle, chunks of 1 / 7 / 4096 / 65536 samples,
+// (and +-30 ppm on SF12), a carrier drift of up to 120 Hz during the frame, 8-bit samples, a DC offset, a 20 ms gap, a reset in the middle, chunks of 1 / 7 / 4096 / 65536 samples,
 // two frames at once on different frequencies, and a weak frame right after a strong one.
 #include "../data/mesh/testutil.h"
 using namespace dect2;
@@ -34,6 +34,18 @@ int main() {
             printf("%-12s clock %+3.0f ppm, %zu-byte frames: %d/2, measured %+.1f ppm\n", s.name, ppm, t.len, ok, est);
             CHECK(ok == 2, "%s clock %.0f ppm: %d/2", s.name, ppm, ok);
         }
+    // carrier drift during the frame (a transmitter warming up): LongFast 80-byte frames last 0.85 s and a bin is 122 Hz, so 45 Hz
+    // from start to end already broke every frame while the offset stayed the one of the preamble
+    for (const auto& s : sets) {
+        if (s.p.sf == 12) continue;
+        for (double hz : {-120.0, -45.0, 45.0, 120.0}) {
+            Trial t;
+            t.p = s.p; t.rate = 1e6; t.off = 100e3; t.cfoHz = 3e3; t.driftHz = hz; t.snrDb = s.p.sf == 8 ? -6 : -10; t.frames = 6; t.len = 80; t.seed = 6;
+            const int ok = runTrial(t);
+            printf("%-12s drift %+4.0f Hz over each 80-byte frame: %d/6\n", s.name, hz, ok);
+            CHECK(ok == 6, "%s drift %.0f Hz: %d/6", s.name, hz, ok);
+        }
+    }
     // 8-bit samples, DC offset, both at a low SNR; chunk sizes; a gap; a reset
     for (const auto& s : sets) {
         Trial base;

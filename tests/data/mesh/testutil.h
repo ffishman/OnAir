@@ -56,6 +56,7 @@ struct Chain {
 struct Trial {
     lora::Params p;
     double rate = 1e6, off = 0, snrDb = 20, cfoHz = 0, sroPpm = 0;
+    double driftHz = 0;          // carrier drift over each frame
     int frames = 10;
     size_t len = 20;
     size_t chunk = 8192;
@@ -76,7 +77,7 @@ inline int runTrial(const Trial& t, std::vector<lora::RxFrame>* outFrames = null
         f.p = t.p;
         pays.push_back(randomBytes(g, t.len));
         f.data = lora::encode(t.p, pays.back().data(), pays.back().size());
-        f.startSec = at; f.freqHz = t.off + t.cfoHz; f.sroPpm = t.sroPpm;
+        f.startSec = at; f.freqHz = t.off + t.cfoHz; f.sroPpm = t.sroPpm; f.driftHz = t.driftHz;
         f.amp = ampFor(t.snrDb, t.p.bwHz, t.rate, t.noiseRms);
         f.phase0 = (g() % 1000) / 1000.0;
         at = f.endSec() + 0.005 + 0.001 * (g() % 40);

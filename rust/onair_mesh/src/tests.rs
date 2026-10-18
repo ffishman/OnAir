@@ -97,3 +97,18 @@ fn text_detail_cut_on_a_character() {
     assert_eq!(o.detail.as_bytes(), &want[..]);
     assert!(std::str::from_utf8(o.detail.as_bytes()).is_ok());
 }
+
+#[test]
+fn text_detail_cut_on_an_emoji() {
+    // 78 ASCII letters then a 4-byte emoji: the cut at 80 falls inside it, so the emoji goes whole
+    let mut text = vec![b'a'; 78];
+    text.extend_from_slice("📡 ok".as_bytes());
+    let mut plain = vec![0x08, 0x01, 0x12, text.len() as u8];
+    plain.extend_from_slice(&text);
+    let d = meshtastic::parse_data(&plain).unwrap();
+    let c = meshtastic::Ctx { from: 1, to: 0xFFFF_FFFF, hop_start: 3, hop_limit: 3, packet_id: 1 };
+    let o = meshtastic::decode_port(&d, &c);
+    let mut want = vec![b'a'; 78];
+    want.extend_from_slice(b"...");
+    assert_eq!(o.detail.as_bytes(), &want[..]);
+}

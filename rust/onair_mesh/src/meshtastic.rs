@@ -123,7 +123,7 @@ fn clean_text(w: &mut Buf, p: &[u8]) {
 }
 
 /// `s` if at most `n` bytes, else its first `n` bytes and "...", cut before a UTF-8 character that would not fit whole.
-pub(crate) fn clip(w: &mut Buf, s: &[u8], n: usize) {
+fn clip(w: &mut Buf, s: &[u8], n: usize) {
     if s.len() <= n {
         w.bytes(s);
     } else {

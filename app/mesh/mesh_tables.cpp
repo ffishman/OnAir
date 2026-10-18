@@ -83,7 +83,7 @@ void nodeTable(const App& a, bool compact) {
         ImGui::TableSetupColumn("Id", ImGuiTableColumnFlags_WidthFixed, 110 * gUi); ImGui::TableSetupColumn("Hardware", ImGuiTableColumnFlags_WidthFixed, 170 * gUi);
         ImGui::TableSetupColumn("Role", ImGuiTableColumnFlags_WidthFixed, 90 * gUi); ImGui::TableSetupColumn("Heard");
         ImGui::TableSetupColumn("SNR dB", ImGuiTableColumnFlags_WidthFixed, hdrW("SNR dB", "-12.5")); ImGui::TableSetupColumn("Hops", ImGuiTableColumnFlags_WidthFixed, hdrW("Hops", "3/7"));
-        ImGui::TableSetupColumn("Battery", ImGuiTableColumnFlags_WidthFixed, hdrW("Battery", "100%")); ImGui::TableSetupColumn("Packets", ImGuiTableColumnFlags_WidthFixed, hdrW("Packets", "99999"));
+        ImGui::TableSetupColumn("Battery", ImGuiTableColumnFlags_WidthFixed, hdrW("Battery", "powered")); ImGui::TableSetupColumn("Packets", ImGuiTableColumnFlags_WidthFixed, hdrW("Packets", "99999"));
     }
     ImGui::TableHeadersRow();
     if (on) {

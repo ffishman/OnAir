@@ -99,6 +99,7 @@ struct RxFrame {
     int corrected = 0;           // codewords with a corrected bit
     double cfoHz = 0;            // carrier offset from the channel centre
     double sfoPpm = 0;           // clock offset measured over the frame
+    double cfoDriftHz = 0;       // how far the carrier moved from the start to the end of the frame (the carrier loop's estimate), CRC errors too
     double snrDb = 0;            // in the LoRa bandwidth
     double levelDb = 0;          // signal power, dB relative to full scale at the channel output
     double startSample = 0;      // start of the frame (its preamble of the configured length), channel samples since the start

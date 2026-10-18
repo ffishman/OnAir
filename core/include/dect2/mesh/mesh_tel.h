@@ -37,6 +37,7 @@ struct MeshPacket {
     std::string preset;
     double freqHz = 0;           // channel centre + measured carrier offset
     double cfoHz = 0;
+    double cfoDriftHz = 0;       // the carrier's move from the start to the end of the frame (a node warming up, no TCXO)
     int sf = 0, cr = 0;
     double bwHz = 0;
     float levelDb = 0;           // signal power in dB relative to full scale (RSSI-like, not calibrated)

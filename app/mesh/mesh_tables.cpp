@@ -185,7 +185,7 @@ void packetTable(const App& a) {
         static std::string note;
         resexp::Table x;
         x.cols = {"time", "frequency_hz", "mode", "type", "from", "to", "channel", "bytes", "decrypted", "hop_limit", "hop_start", "snr_db", "level_dbfs", "sf", "bw_hz",
-                  "detail", "raw", "packet_id", "relay_node", "next_hop", "via_mqtt", "cfo_hz"};
+                  "detail", "raw", "packet_id", "relay_node", "next_hop", "via_mqtt", "cfo_hz", "cfo_drift_hz"};
         const double now = (double)std::time(nullptr);
         for (const dect2::MeshPacket& p : t.packets) {
             const double ep = meshEpoch(t, p.timeSec, now);
@@ -199,7 +199,7 @@ void packetTable(const App& a) {
             x.add({meshTime(ep), resexp::num(p.freqHz, 0), protoName(p.protocol), p.crcOk ? p.type : "CRC error", p.from, p.to, p.channel, std::to_string(p.size),
                    p.decrypted ? "yes" : "no", p.hopLimit >= 0 ? std::to_string(p.hopLimit) : "", p.hopStart >= 0 ? std::to_string(p.hopStart) : "",
                    resexp::num(p.snrDb, 1), resexp::num(p.levelDb, 1), std::to_string(p.sf), resexp::num(p.bwHz, 0), p.detail.empty() ? p.note : p.detail, p.raw,
-                   pid, rel, nxt, mt ? (p.viaMqtt ? "yes" : "no") : "", resexp::num(p.cfoHz, 0)}, ep);
+                   pid, rel, nxt, mt ? (p.viaMqtt ? "yes" : "no") : "", resexp::num(p.cfoHz, 0), resexp::num(p.cfoDriftHz, 0)}, ep);
         }
         resexp::saveButton(x, "mesh-packets", note, "svmp");
         if (!note.empty()) { ImGui::SameLine(); ImGui::TextDisabled("%s", note.c_str()); }

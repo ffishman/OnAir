@@ -531,7 +531,8 @@ void Demod::Impl::dataSymbol(const ChanBuf& b, std::vector<RxFrame>& out) {
     // and from about a third of a bin the peaks of the last symbols land in the next bin (CR 4/5 only detects that). The peak's fractional
     // position shows the residual offset of every symbol alike; a second-order loop follows it (only on clear peaks).
     constexpr double kCfoP = 0.08, kCfoI = 0.005;   // follows 180 Hz over a LongFast frame; higher gains cost sensitivity in noise
-    if (q > 8) { const double e = frac(k); cfoRate += kCfoI * e; cfoBins += kCfoP * e; }
+    static const bool noCfoLoop = std::getenv("DECT2_MESH_NO_CFO_LOOP") != nullptr;   // the offset of the preamble, as before (A/B on recordings)
+    if (!noCfoLoop && q > 8) { const double e = frac(k); cfoRate += kCfoI * e; cfoBins += kCfoP * e; }
     cfoBins += cfoRate;
     // Timing loop. The peak's fractional position does not show a timing error: the shift of the tone is undone, on average,
     // by the phase step where the chirp wraps. That step itself measures it: the de-chirped symbol's two parts (before and after
@@ -582,6 +583,7 @@ void Demod::Impl::dataSymbol(const ChanBuf& b, std::vector<RxFrame>& out) {
         f.corrected = corr;
         f.cfoHz = cfo0 * p.bwHz / N;   // the offset at the start of the frame (the node's own one, as a fingerprint)
         f.sfoPpm = (drift + loopInt) / N * 1e6;
+        f.cfoDriftHz = (cfoBins - cfo0) * p.bwHz / N;
         f.snrDb = 10 * std::log10(snrLin);
         f.levelDb = 10 * std::log10(std::max(levelLin, 1e-20));
         f.startSample = frameStart;

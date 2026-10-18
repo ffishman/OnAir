@@ -41,6 +41,22 @@ int main() {
         for (double hz : {-120.0, -45.0, 45.0, 120.0}) {
             Trial t;
             t.p = s.p; t.rate = 1e6; t.off = 100e3; t.cfoHz = 3e3; t.driftHz = hz; t.snrDb = s.p.sf == 8 ? -6 : -10; t.frames = 6; t.len = 80; t.seed = 6;
+            std::vector<lora::RxFrame> fr;
+            const int ok = runTrial(t, &fr);
+            double est = 0; int n = 0;
+            for (const auto& f : fr) if (f.crcOk) { est += f.cfoDriftHz; n++; }
+            if (n) est /= n;
+            printf("%-12s drift %+4.0f Hz over each 80-byte frame: %d/6, measured %+.0f Hz\n", s.name, hz, ok, est);
+            CHECK(ok == 6, "%s drift %.0f Hz: %d/6", s.name, hz, ok);
+            CHECK(n && std::abs(est - hz) < 0.35 * std::abs(hz), "%s drift %.0f Hz measured as %.0f", s.name, hz, est);
+        }
+    }
+    // SF12: the drift per symbol is 16 times LongFast's, the loop follows a slower one (+-45 Hz over a 2.8 s frame)
+    for (const auto& s : sets) {
+        if (s.p.sf != 12) continue;
+        for (double hz : {-45.0, 45.0}) {
+            Trial t;
+            t.p = s.p; t.rate = 1e6; t.off = 100e3; t.cfoHz = 3e3; t.driftHz = hz; t.snrDb = -14; t.frames = 6; t.len = 80; t.seed = 6;
             const int ok = runTrial(t);
             printf("%-12s drift %+4.0f Hz over each 80-byte frame: %d/6\n", s.name, hz, ok);
             CHECK(ok == 6, "%s drift %.0f Hz: %d/6", s.name, hz, ok);

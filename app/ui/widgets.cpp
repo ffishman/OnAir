@@ -463,7 +463,8 @@ void lossTooltip(const SampleLoss& l) {
             ImGui::Text(tr("Arriving from the radio: %.1f%% of the set rate"), l.deliveredPct);
         else ImGui::TextUnformatted(tr("Arriving from the radio: not measured yet"));
         ImGui::TextDisabled("%s", l.rateLow
-            ? tr("Below 97% of the rate the radio was set to: the radio or its driver is handing over less than asked. This is not the receiver's CPU load. Try a USB port on the computer (no hub), a shorter cable, or a lower sample rate.")
+            ? (l.network ? tr("Below 97% of the rate the radio was set to: the network link or the radio's server is handing over less than asked. This is not the receiver's CPU load. Try a wired connection or a lower sample rate.")
+                         : tr("Below 97% of the rate the radio was set to: the radio or its driver is handing over less than asked. This is not the receiver's CPU load. Try a USB port on the computer (no hub), a shorter cable, or a lower sample rate."))
             : tr("The sample rate actually handed over by the radio, over the last seconds. A warning appears below 97% of the set rate."));
         ImGui::Spacing();
         ImGui::Text(tr("Callback gaps: %.2f s in %llu gaps, last %s"), l.radioSec, (unsigned long long)l.radioEvents, ago(l.sinceRadioSec).c_str());

@@ -42,17 +42,24 @@ void Engine::watchRadio() {
             radioLost_ = true;
             automation::receiverState("dropped", "the radio stopped sending samples");
             nextReconnect_ = now + seconds(1);
-            log(lastDev_.isNetwork() ? "network radio stopped sending samples - waiting for its server to come back"
-                : (lastDev_.kind == DeviceInfo::HackRF || lastDev_.kind == DeviceInfo::Native) ? "radio stopped sending samples (unplugged?) - waiting for it to come back"
-                : "radio stopped sending samples - press Stop and Start to open it again");
+            lostSince_ = lastSamples_;
+            // a HackRF is reopened below and the native radios reopen themselves; a SoapySDR (SoapyRemote too), Hamlib or audio radio does not
+            const bool reopens = lastDev_.kind == DeviceInfo::HackRF || lastDev_.kind == DeviceInfo::Native;
+            log(!reopens ? "radio stopped sending samples - press Stop and Start to open it again"
+                : lastDev_.isNetwork() ? "network radio stopped sending samples - waiting for its server to come back"
+                : "radio stopped sending samples (unplugged?) - waiting for it to come back");
         }
         return;
     }
     if (lastDev_.kind != DeviceInfo::HackRF) {
-        if (now - lastSamples_ < milliseconds(500)) {   // the source reopened the radio or its link by itself
+        // the source reopened the radio or its link by itself, or a stall shorter than the source's own timeout ended (rtl_tcp: 3 s)
+        if (now - lastSamples_ < milliseconds(500)) {
             radioLost_ = false;
             holdDelivery(1000);   // the reconnect gap is not a loss of the link
-            log("radio is sending samples again");
+            resetReq_ = true;     // the receiver starts again from the new samples, as after a HackRF reconnect
+            char b[96];
+            snprintf(b, sizeof b, "radio is sending samples again, after %.1f s", duration<double>(lastSamples_ - lostSince_).count());
+            log(b);
             automation::receiverState("reconnected", "the radio is back");
         }
         return;
@@ -142,6 +149,7 @@ void Engine::checkDelivery() {
 SampleLoss Engine::sampleLoss() const {
     SampleLoss l;
     l.live = live_.load();
+    l.network = lastDev_.isNetwork();
     const double r = std::max(1.0, srcRate_);   // the ring holds the radio's samples (before any resampling)
     l.radioSec = radioMissing_.load() / r;
     l.cpuSec = (double)ring_.dropped() / r;

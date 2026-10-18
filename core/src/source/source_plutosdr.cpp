@@ -668,6 +668,7 @@ DeviceInfo plutoEntry(const std::string& uri, const std::string& desc, bool prob
     d.kind = DeviceInfo::Native;
     d.board = "pluto";
     d.nativeArgs = uri;
+    d.network = !overUsbCable(uri);
     d.name = "PlutoSDR " + (desc.empty() ? uri : "(" + uri + ")") + (probe ? " (native, experimental)" : " (network)");
     // over USB 2 a Pluto keeps up with about 4 Msps (3 over its USB-gadget network address); over a real network the converter's full rate is offered
     // a mode that needs more still gets it (linkRateFor: some lost samples beat no decode, e.g. DVB-T/T2 at 64/7 Msps)

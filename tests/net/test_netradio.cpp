@@ -202,6 +202,9 @@ static void testEngineRadioBack() {
     CHECK(waitUntil(true, 5000));    // more than 2 s without samples
     srv.pause = false;
     CHECK(waitUntil(false, 3000));   // back without Stop and Start
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    CHECK(!rx.radioLost());          // and it stays back
+    CHECK(rx.sampleLoss().network);
     rx.stop();
     srv.stop();
 }

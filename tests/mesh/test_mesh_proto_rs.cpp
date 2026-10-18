@@ -191,5 +191,7 @@ int main() {
     testMeshtastic(iters);
     const int rc2 = runMeshProto2();
     if (rc2) return 1;
-    return golden::checkDual("mesh_proto_rs", dig, 0x9c82d2bce01c85a6ull, 0xf5f1fd51d51330d5ull, !getenv("ONAIR_DIFF_ITERS"));
+    // recorded again after the decoder kept battery level 101 ("powered") and cut the text detail on a whole UTF-8 character
+
+    return golden::checkDual("mesh_proto_rs", dig, 0xee9683a7eca177d7ull, 0xc52640a6dd6cfadbull, !getenv("ONAIR_DIFF_ITERS"));
 }

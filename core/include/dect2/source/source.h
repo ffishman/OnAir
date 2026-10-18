@@ -153,6 +153,7 @@ struct DeviceInfo {
     bool isRadio() const { return kind == HackRF || kind == Soapy || kind == Native || kind == Hamlib; }
     bool isGeneric() const { return kind == Soapy || kind == Native; }   // one overall gain, a sample-rate range reported by the radio
     bool isAudio() const { return kind == Audio; }
+    bool isNetwork() const { return name.find(" (network") != std::string::npos; }   // rtl_tcp, SpyServer, KiwiSDR, a Pluto by IP, ...: a link that is not USB
 };
 
 class IqSource {

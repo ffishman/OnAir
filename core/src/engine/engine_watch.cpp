@@ -31,7 +31,8 @@
 namespace dect2 {
 
 // A radio that was delivering samples and stops (the cable was pulled) is reported, and a HackRF is opened again with the settings in use
-// as soon as it is back, so that the receiver carries on by itself.
+// as soon as it is back, so that the receiver carries on by itself. The other radios (native_common.h: RTL-SDR, Airspy, rtl_tcp and the
+// other network radios) reopen themselves: when their samples come back, the loss is cleared here.
 void Engine::watchRadio() {
     if (!src_ || !src_->realtimeHardware()) return;
     using namespace std::chrono;
@@ -41,11 +42,22 @@ void Engine::watchRadio() {
             radioLost_ = true;
             automation::receiverState("dropped", "the radio stopped sending samples");
             nextReconnect_ = now + seconds(1);
-            log(lastDev_.kind == DeviceInfo::HackRF ? "radio stopped sending samples (unplugged?) - waiting for it to come back" : "radio stopped sending samples - press Stop and Start to open it again");
+            log(lastDev_.isNetwork() ? "network radio stopped sending samples - waiting for its server to come back"
+                : (lastDev_.kind == DeviceInfo::HackRF || lastDev_.kind == DeviceInfo::Native) ? "radio stopped sending samples (unplugged?) - waiting for it to come back"
+                : "radio stopped sending samples - press Stop and Start to open it again");
         }
         return;
     }
-    if (lastDev_.kind != DeviceInfo::HackRF || now < nextReconnect_) return;
+    if (lastDev_.kind != DeviceInfo::HackRF) {
+        if (now - lastSamples_ < milliseconds(500)) {   // the source reopened the radio or its link by itself
+            radioLost_ = false;
+            holdDelivery(1000);   // the reconnect gap is not a loss of the link
+            log("radio is sending samples again");
+            automation::receiverState("reconnected", "the radio is back");
+        }
+        return;
+    }
+    if (now < nextReconnect_) return;
     nextReconnect_ = now + seconds(2);
     TuneSettings tune;
     { std::lock_guard<std::mutex> lk(tuneMu_); tune = lastTune_; }
@@ -105,8 +117,12 @@ void Engine::checkDelivery() {
         if (now - lastRadioLogNs_.load() > 10000000000LL) {
             lastRadioLogNs_ = now;
             char b[240];
-            snprintf(b, sizeof b, "the radio did not deliver %.0f ms of signal (%.2f s in all): its USB connection or driver could not keep up. Try another USB port (not a hub), a shorter cable or a lower sample rate",
-                     1000 * step / srcRate_, radioMissing_.load() / srcRate_);
+            if (lastDev_.isNetwork())
+                snprintf(b, sizeof b, "the radio did not deliver %.0f ms of signal (%.2f s in all): its network link or server could not keep up. Try a wired connection or a lower sample rate",
+                         1000 * step / srcRate_, radioMissing_.load() / srcRate_);
+            else
+                snprintf(b, sizeof b, "the radio did not deliver %.0f ms of signal (%.2f s in all): its USB connection or driver could not keep up. Try another USB port (not a hub), a shorter cable or a lower sample rate",
+                         1000 * step / srcRate_, radioMissing_.load() / srcRate_);
             log(b);
         }
     }

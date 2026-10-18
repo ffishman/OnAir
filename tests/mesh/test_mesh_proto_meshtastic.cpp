@@ -120,7 +120,7 @@ int main() {
         }
         p = meshtasticTelemetry(a, 0x4002, 3, 3, 101, 5.0, 0, 0, 5);
         r = mp.decodeMeshtastic(p.data(), p.size(), kRadio);
-        CHECK(r.nodes.size() == 1 && r.nodes[0].batteryPct == 100 && r.packet.detail.find("powered") != std::string::npos, "powered: %s", r.packet.detail.c_str());
+        CHECK(r.nodes.size() == 1 && r.nodes[0].batteryPct == 101 && r.packet.detail.find("powered") != std::string::npos, "powered: %s", r.packet.detail.c_str());
         p = meshtasticEnvTelemetry(a, 0x4003, 3, 3, 31.5, 48, 1005.5);
         r = mp.decodeMeshtastic(p.data(), p.size(), kRadio);
         CHECK(r.nodes.size() == 1 && r.nodes[0].hasEnv && std::abs(r.nodes[0].tempC - 31.5) < 1e-5 && std::abs(r.nodes[0].humidity - 48) < 1e-5 && std::abs(r.nodes[0].pressureHpa - 1005.5) < 1e-3, "environment");

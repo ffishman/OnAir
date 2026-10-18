@@ -107,7 +107,8 @@ void nodeTable(const App& a, bool compact) {
                 ImGui::TableNextColumn(); ImGui::Text("%.1f", n->lastSnrDb);
                 ImGui::TableNextColumn(); if (n->hopsAway >= 0) ImGui::Text("%d", n->hopsAway); else ImGui::TextUnformatted("-");
                 ImGui::TableNextColumn();
-                if (n->batteryPct >= 0) ImGui::Text("%.0f %%", n->batteryPct);
+                if (n->batteryPct > 100) ImGui::TextUnformatted("powered");
+                else if (n->batteryPct >= 0) ImGui::Text("%.0f %%", n->batteryPct);
                 else if (n->voltage > 0) ImGui::Text("%.2f V", n->voltage);
                 else ImGui::TextUnformatted("-");
                 ImGui::TableNextColumn(); ImGui::Text("%u", n->packets);

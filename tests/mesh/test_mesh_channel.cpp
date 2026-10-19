@@ -1,10 +1,10 @@
 // Mesh channel file (mesh-channel-YYYY-MM-DD.csv): a line per channel per minute with the noise floor and the occupancy. Noise
 // alone: a flat floor, almost no occupancy, no frames. The test scene: frames decode, the occupancy follows their air time and what
 // no frame accounts for stays small. The panel gets the same minutes.
-#include "dect2/gen_util.h"
-#include "dect2/mesh_gen.h"
-#include "dect2/mesh_rx.h"
-#include "dect2/modes.h"
+#include "dect2/dsp/gen_util.h"
+#include "dect2/mesh/mesh_gen.h"
+#include "dect2/mesh/mesh_rx.h"
+#include "dect2/engine/modes.h"
 #include <cmath>
 #include <cstdio>
 #include <filesystem>

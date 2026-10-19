@@ -87,6 +87,8 @@ void loadState() {
     S.region = std::max(0, std::min(kNumPlans - 1, (int)d.getI("meshRegion", 0)));
     S.protocols = (int)d.getI("meshProtocols", 15);
     S.allPresets = d.getB("meshPresets", false);
+    S.record = d.getB("meshRecord", false);
+    snprintf(S.recordDir, sizeof S.recordDir, "%s", d.getS("meshRecordDir", plat::dataDir() + "/mesh-log").c_str());
     S.mtRegion = d.getS("meshMtRegion", "");
     S.mtPreset = d.getS("meshMtPreset", "LongFast");
     S.mcPreset = d.getS("meshCorePreset", "");
@@ -161,6 +163,11 @@ void tick(App& a) {
     if (S.pushedRegion != effRegion(a)) { S.pushedRegion = effRegion(a); r.setRegion(kPlans[S.pushedRegion].rxRegion); }
     if (S.pushedProtocols != effProtocols(a)) { S.pushedProtocols = effProtocols(a); r.setProtocols(S.pushedProtocols); }   // a protocol entry: only its own network
     if (S.pushedPresets != (int)S.allPresets) { r.setPresetSearch(S.allPresets); S.pushedPresets = (int)S.allPresets; }
+    {
+        const std::string want = S.record ? std::string(S.recordDir) : std::string();
+        if (want != S.pushedRecord) { r.setRecordDir(want); S.pushedRecord = want; }
+    }
+    r.setGainDb(a.agcOn ? -1 : a.tune.gainDb);   // for the channel file (dBFS levels compare only at one gain)
     if (S.pushedTuned != a.freqMhz) { r.setTunedHz(a.freqMhz * 1e6); S.pushedTuned = a.freqMhz; }   // the engine does not pass the user's frequency
     if (!a.engine.running()) { S.lastSeq = 0; S.logPrimed = false; return; }
     if (live(a) && a.rx.seq != S.lastSeq) {
@@ -246,6 +253,12 @@ void receiver(App& a) {
     kv("frames", "%llu good, %llu CRC errors, %llu bad headers", (unsigned long long)t.blocksOk, (unsigned long long)t.blocksBad, (unsigned long long)t.headerBad);
     kv("preambles", "%llu", (unsigned long long)t.preambles);
     kv("signal time", "%s", clock(t.timeSec).c_str());
+    // the last full minute of each channel: noise floor and how much of the time it carried energy (dBFS: for trends at one gain)
+    if (t.channelMinutes.empty()) kv("channel", "%s", "measuring (a line per full minute)");
+    for (const auto& m : t.channelMinutes)
+        kv("channel", "%s%sfloor %.1f dBFS, occupancy %.1f %% (decoded %.1f %%), preambles lost %llu",
+           t.channelMinutes.size() > 1 ? m.preset.c_str() : "", t.channelMinutes.size() > 1 ? ": " : "", m.floorDbfs, m.occupancyPct,
+           m.decodedAirtimePct, (unsigned long long)m.preamblesLost);
     ImGui::Spacing();
     { ImGui::PushTextWrapPos(0); ImGui::TextDisabled("LoRa settings searched"); ImGui::PopTextWrapPos(); }
     if (ImGui::BeginTable("##mdec", 9, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX, ImVec2(0, std::max(60.f * gUi, ImGui::GetContentRegionAvail().y * 0.5f)))) {

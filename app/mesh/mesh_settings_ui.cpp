@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <thread>
 
@@ -249,6 +250,31 @@ void loraSettings(App& a) {
     if (retune && a.engine.running()) startReceiver(a);
 }
 
+// Recording: nothing is lost to the list limits; the files are plain CSV (one line per packet, one per telemetry / position report)
+void recordSettings(App& a) {
+    ImGui::TextDisabled("Recording");
+    if (ImGui::Checkbox("Record every packet and report to disk", &S.record)) plat::prefs().setB("meshRecord", S.record);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Two CSV files a day in the folder below, written as each packet arrives:\n"
+                          "mesh-packets-YYYY-MM-DD.csv (time, node, type, SNR, level, hops, ...) and\n"
+                          "mesh-readings-YYYY-MM-DD.csv (battery, voltage, channel use, sensors, position, with the SNR).\n"
+                          "The lists in the app keep only the last ones; these files keep everything.");
+    ImGui::SetNextItemWidth(420 * gUi);
+    if (ImGui::InputText("##mrecdir", S.recordDir, sizeof S.recordDir, ImGuiInputTextFlags_EnterReturnsTrue)) plat::prefs().setS("meshRecordDir", S.recordDir);
+    if (ImGui::IsItemDeactivatedAfterEdit()) plat::prefs().setS("meshRecordDir", S.recordDir);
+    ImGui::SameLine(0, 6 * gUi);
+    if (ImGui::SmallButton("open folder")) {
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::u8path(S.recordDir), ec);
+        dect2::openUrl(S.recordDir);
+    }
+    const std::string st = a.engine.mesh().recordStatus();
+    if (S.record) {
+        if (st.rfind("cannot", 0) == 0) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", st.c_str());
+        else ImGui::TextDisabled("%lld lines written since the start", a.engine.mesh().recordLines());
+    }
+}
+
 void settingsView(App& a) {
     loadState();
     ImGui::TextDisabled("Band plan");
@@ -291,6 +317,10 @@ void settingsView(App& a) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Off: LongFast only (the default of every new node). On: also MediumFast, MediumSlow, ShortFast, ShortSlow, LongModerate\nand LongSlow, each on its own channel slot. Uses more CPU, and only the slots inside the captured band are searched.");
     ImGui::Spacing();
     loraSettings(a);
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    recordSettings(a);
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();

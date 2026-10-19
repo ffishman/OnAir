@@ -2,6 +2,8 @@
 //   dect2cli --hackrf [--freq MHz] [--lna dB] [--vga dB] [--amp] [--bw MHz] [--secs N]
 //   dect2cli --file path.cs8 --rate Msps [--format cs8|cu8|cf32] [--bw MHz] [--secs N]
 //   dect2cli ... --net-radio rtltcp,192.168.2.197,1234   (a radio on the network instead of the first one plugged in)
+//   dect2cli --standard meshtastic --freq 919.875 --mesh-region anz --mesh-record ~/mesh-log --secs 0   (Mesh: every packet and
+//     telemetry / position report appended to mesh-packets-YYYY-MM-DD.csv and mesh-readings-YYYY-MM-DD.csv; --secs 0 runs until stopped)
 //   dect2cli ... --record out.cs8|out.cf32|folder|auto --secs N   (any radio or --synthetic, not --file: saves the radio's raw samples at its own
 //     rate while receiving, for N seconds, and prints the size; a folder or "auto" (the current folder) gets a name like
 //   dect2cli --standard iridium ... --iridium-bits output.bits   (Iridium: every burst as a gr-iridium "RAW:" line for iridium-toolkit;
@@ -64,6 +66,7 @@ int main(int argc, char** argv) {
     bool useFile = false, haveDev = false, synthetic = false, listen = false, atvFm = false;
     bool dpmrScan = false;
     double dvbcSr = 0; int dvbcQam = 0; bool dvbcAnnexC = false;
+    std::string meshRecord; int meshRegion = -1; double meshOccDb = 6;
     std::string netRadio;   // --net-radio: a radio on the network, as the settings keep it ("rtltcp,host,port"); used instead of the first one found
     int orbcommMax = 2;
     double refLat = 0, refLon = 0; bool haveRef = false;
@@ -85,6 +88,9 @@ int main(int argc, char** argv) {
         else if (a == "--ble-channel") { freq = dect2::ble::channelMhz(atoi(next())); freqSet = true; }   // with --standard ble: advertising channel 37, 38 or 39
         else if (a == "--dvbc-sr") dvbcSr = atof(next()) * 1e6;   // with --standard dvbc: a manual symbol rate in Msym/s (default: measured)
         else if (a == "--dvbc-qam") dvbcQam = atoi(next());       // with --standard dvbc: 16, 32, 64, 128 or 256 (default: found from the stream)
+        else if (a == "--mesh-record") meshRecord = next();   // Mesh: every packet and report to CSV files in this folder, one set a day
+        else if (a == "--mesh-occ-threshold") meshOccDb = atof(next());   // Mesh channel file: dB above the noise floor that count as occupied (6)
+        else if (a == "--mesh-region") { const std::string v = next(); meshRegion = v == "us" ? 1 : v == "anz" ? 2 : 0; }   // Mesh band plan: eu (default), us, anz
         else if (a == "--net-radio") netRadio = next();         // e.g. rtltcp,192.168.2.197,1234 (any type the app's "Add network radio" takes)
         else if (a == "--dpmr-scan") dpmrScan = true;           // with --standard dpmr: scan the 16 PMR446 channels (tune to one of them)
         else if (a == "--orbcomm-downlinks") orbcommMax = atoi(next());   // with --standard orbcomm: 1 or 2 downlinks decoded at once (default 2)
@@ -254,6 +260,10 @@ int main(int argc, char** argv) {
     e.setStandard(standard);
     applySubMode(e, subMode);
     if (standard == 22) e.mesh().setTunedHz(freq * 1e6);   // mesh places its channels from the tuned frequency
+    if (meshRegion >= 0) e.mesh().setRegion(meshRegion);
+    if (!meshRecord.empty()) { e.mesh().setRecordDir(meshRecord); printf("mesh: recording to %s\n", meshRecord.c_str()); }
+    e.mesh().setGainDb(tune.gainDb);
+    e.mesh().setOccupancyThresholdDb(meshOccDb);
     if (atvFm) e.atv().setModulation(1);
     e.setBandwidthAuto(autoBw);
     e.setSpectrumEnabled(autoBw);   // cli doesn't show the spectrum
@@ -280,7 +290,7 @@ int main(int argc, char** argv) {
     RxTelemetry t; uint64_t seq = 0;
     SpectrumFrame sf; uint64_t sseq = 0;
     auto t0 = std::chrono::steady_clock::now();
-    while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < secs) {
+    while (secs <= 0 || std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < secs) {   // --secs 0: until stopped
         for (int w = 0; w < 100; w++) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             if (playSid >= 0) {

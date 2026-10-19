@@ -33,6 +33,9 @@ struct State {
     std::vector<Key> keys;
     bool keysPushed = false;
     int pushedRegion = -1, pushedProtocols = -1, pushedPresets = -1;
+    bool record = false;                         // every packet and report to a CSV file per day (prefs "meshRecord", "meshRecordDir")
+    char recordDir[512] = "";
+    std::string pushedRecord = "-";
     // Meshtastic region / modem preset ("" = from the band plan) and the custom LoRa setting of each entry (prefs "meshCustom<mask>")
     std::string mtRegion, mtPreset = "LongFast", pushedMt = "-", pushedCustom = "-";
     struct Custom { bool on = false; double mhz = 869.525, bwHz = 125000; int sf = 9, cr = 5, sync = 0x2B, preamble = 16; };
@@ -126,5 +129,6 @@ bool planCombo(App& a, const char* id, int& r, bool shortNames);
 void applyRegion(App& a, int region);
 State::Custom& customOf(const App& a);
 void settingsView(App& a);
+void recordSettings(App& a);
 
 }  // namespace meshui

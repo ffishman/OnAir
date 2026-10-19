@@ -7,7 +7,9 @@
 #include "dect2/mesh/mesh_lora.h"
 #include "dect2/mesh/mesh_presets.h"
 #include "dect2/mesh/mesh_proto.h"
+#include "dect2/mesh/mesh_record.h"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -146,12 +148,50 @@ struct MeshReceiver::Impl {
         std::vector<int> protos;           // protocols to try on a frame, in order
         lora::DemodStats seen;
     };
+    // A channel's energy over the current minute: the power of every 1 ms window of the channel samples (already mixed to 0 Hz and
+    // filtered to about 3 x the bandwidth) in a histogram of 0.5 dB steps from -120 to 0 dBFS, and what was decoded in it
+    struct Energy {
+        static constexpr int kBins = 240;
+        std::array<uint32_t, kBins> hist{};
+        long long windows = 0;
+        float peak = -200;
+        double acc = 0;                    // the window being summed
+        int accN = 0, winLen = 1;
+        int64_t measured = 0;              // the next channel sample to measure
+        double airSec = 0;
+        // headerBad: preambles whose sync word matched but whose header failed (a frame of this network lost). The preamble detector's
+        // own count is not kept: it also fires on noise, about 3 times a second at SF11.
+        uint64_t frames = 0, crcBad = 0, headerBad = 0;
+        void clearMinute() { hist.fill(0); windows = 0; peak = -200; airSec = 0; frames = crcBad = headerBad = 0; }
+        void measure(const lora::ChanBuf& b) {
+            for (int64_t i = std::max(measured, b.begin()); i < b.end(); i++) {
+                const cf32 v = *b.at(i);
+                acc += (double)v.real() * v.real() + (double)v.imag() * v.imag();
+                if (++accN < winLen) continue;
+                const double db = 10 * std::log10(acc / accN + 1e-30);
+                acc = 0; accN = 0;
+                hist[(size_t)std::max(0, std::min(kBins - 1, (int)std::floor((db + 120) * 2)))]++;
+                windows++;
+                peak = std::max(peak, (float)db);
+            }
+            measured = b.end();
+        }
+        // the level below which a fraction q of the windows lie (the middle of its 0.5 dB step)
+        float quantile(double q) const {
+            const double want = q * (double)windows;
+            double cum = 0;
+            for (int i = 0; i < kBins; i++) { cum += hist[(size_t)i]; if (cum >= want && cum > 0) return -120 + (i + 0.5f) * 0.5f; }
+            return 0;
+        }
+    };
     struct Chan {
         std::unique_ptr<lora::Channelizer> ch;
         lora::ChanBuf buf;
         std::vector<Dec> decs;
         double freqHz = 0;
         int64_t base = 0;                  // input sample at which the channel started
+        std::string presets;               // the presets it serves, for the channel file
+        Energy en;
     };
     std::vector<Chan> chans;
     std::vector<cf32> pend;
@@ -165,6 +205,41 @@ struct MeshReceiver::Impl {
     std::vector<lora::RxFrame> frames;
     double lastGood = -1e9, lastPreamble = -1e9;
     uint64_t preamblesSeen = 0;
+    std::atomic<double> gainDb{-1};        // the radio's fixed gain, for the channel file (-1 unknown)
+    std::atomic<double> occThresholdDb{6}; // a window above the floor by this much counts as occupied
+    long long curMinute = -1;              // the minute (of the computer clock) the channels are measuring
+    double minuteAnchor = 0;               // computer clock - sample clock at the start
+    bool minuteAnchored = false;
+    double lostSec = 0, lostAtMinute = 0;  // signal the radio did not deliver (stalls), in all and at the minute's start
+
+    MeshRecorder rec;                    // the CSV log on disk (off until a folder is set)
+
+    static double wallNow() { return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+
+    // The packet's time on the computer clock: the sample clock (exact between two packets, to the sample) plus an offset to the
+    // computer clock. The offset is the smallest wall - sample difference seen (the least processing delay); it moves on when the
+    // stream stalled or lost samples (the difference grew by more than half a second). Before, the list took the time from the
+    // last samples received, so a stalled stream moved every packet by the length of the stall.
+    double wallOffset = 0;
+    bool wallAnchored = false;
+    double frameUnixTime(double sampleSec) {
+        const double off = wallNow() - now();
+        if (wallAnchored && off - wallOffset > 0.5) lostSec += off - wallOffset;   // the stream stalled or lost samples
+        if (!wallAnchored || off < wallOffset || off - wallOffset > 0.5) { wallOffset = off; wallAnchored = true; }
+        return wallOffset + sampleSec;
+    }
+
+    // every packet goes to the list (the last kPacketCap) and, when recording, to the day's file
+    void pushPacket(MeshPacket&& row) {
+        std::string name;
+        if (row.protocol <= 2 && !row.from.empty()) {
+            auto it = nodeIdx.find(std::to_string(row.protocol) + "|" + row.from);
+            if (it != nodeIdx.end()) name = tel.nodes[it->second].longName;
+        }
+        row.unixTime = frameUnixTime(row.timeSec);
+        rec.packet(row, row.unixTime, name);
+        capPush(tel.packets, std::move(row), kPacketCap);
+    }
 
     void logf(const std::string& s) {
         std::function<void(const std::string&)> cb;
@@ -208,7 +283,9 @@ struct MeshReceiver::Impl {
                 c->freqHz = e.freqHz;
                 c->base = nProc;
                 c->buf.clear(0);
+                c->en.winLen = std::max(1, (int)std::lround(c->ch->outRate() * 1e-3));
             }
+            c->presets += (c->presets.empty() ? "" : " / ") + e.preset;
             Dec dc;
             dc.dm = std::make_unique<lora::Demod>(e.p, c->ch->outRate());
             dc.dm->reset(0);
@@ -229,16 +306,49 @@ struct MeshReceiver::Impl {
         logf("Mesh: listening to " + (inBand.empty() ? std::string("nothing (no channel of the region in the captured band)") : inBand));
     }
 
+    // a minute is over: one line per channel to the channel file and to the report
+    void closeMinute(long long minute) {
+        tel.channelMinutes.clear();
+        const double thr = occThresholdDb.load(), gain = gainDb.load();
+        const long long lost = (long long)std::llround((lostSec - lostAtMinute) * curRate);
+        lostAtMinute = lostSec;
+        for (auto& c : chans) {
+            Energy& e = c.en;
+            if (e.windows > 0) {
+                MeshChannelMinute m;
+                m.unixTime = (double)minute * 60; m.freqHz = c.freqHz; m.bwHz = c.ch->bwHz(); m.preset = c.presets;
+                m.windows = e.windows;
+                m.floorDbfs = e.quantile(0.10); m.p50Dbfs = e.quantile(0.50); m.p90Dbfs = e.quantile(0.90); m.peakDbfs = e.peak;
+                long long above = 0;
+                for (int i = 0; i < Energy::kBins; i++) if (-120 + (i + 0.5f) * 0.5f > m.floorDbfs + thr) above += e.hist[(size_t)i];
+                const double span = (double)e.windows * 1e-3;
+                m.occupancyPct = (float)(100.0 * (double)above / (double)e.windows);
+                m.decodedAirtimePct = (float)std::min(100.0, 100.0 * e.airSec / span);
+                m.undecodedPct = std::max(0.f, m.occupancyPct - m.decodedAirtimePct);
+                m.frames = e.frames; m.crcBad = e.crcBad; m.preambles = e.frames + e.headerBad;
+                m.preamblesLost = e.headerBad;
+                m.gainDb = gain; m.inputRate = curRate; m.samplesLost = lost;
+                rec.channel(m);
+                tel.channelMinutes.push_back(m);
+            }
+            e.clearMinute();
+        }
+    }
+
     void processBlock(const cf32* x, size_t n) {
         for (auto& c : chans) {
             c.ch->process(x, n, c.buf);
+            c.en.measure(c.buf);
             int64_t keep = c.buf.end();
             for (auto& d : c.decs) {
                 frames.clear();
                 d.dm->process(c.buf, frames);
                 for (auto& f : frames) onFrame(c, d, f);
                 const auto& st = d.dm->stats();
-                if (st.preambles != d.seen.preambles) { lastPreamble = now(); preamblesSeen += st.preambles - d.seen.preambles; }
+                if (st.preambles != d.seen.preambles) {
+                    lastPreamble = now(); preamblesSeen += st.preambles - d.seen.preambles;
+                }
+                c.en.headerBad += st.headerBad - d.seen.headerBad;
                 MeshDecoderInfo& di = tel.decoders[d.info];
                 di.headerBad = st.headerBad; di.syncBad = st.syncBad;
                 d.seen = st;
@@ -248,6 +358,13 @@ struct MeshReceiver::Impl {
             c.buf.trim(keep);
         }
         nProc += (int64_t)n;
+        // the minutes: the sample clock from the computer clock at the start, plus the stalls (live, that is the computer clock; from a
+        // file or a test, faster than real time, they still last a minute of signal)
+        frameUnixTime(now());                // counts the stalls
+        if (!minuteAnchored) { minuteAnchor = wallNow() - now(); minuteAnchored = true; }
+        const long long minute = (long long)std::floor((minuteAnchor + now() + lostSec) / 60);
+        if (curMinute < 0) curMinute = minute;
+        else if (minute != curMinute) { closeMinute(curMinute); curMinute = minute; }
     }
 
     // a packet from the node: when, how strong (the report's first / last heard and SNR range)
@@ -290,6 +407,8 @@ struct MeshReceiver::Impl {
         const bool good = f.crcOk || !f.hdr.crc;
         di.frames++;
         if (!good) di.crcBad++;
+        c.en.frames++;
+        if (!good) c.en.crcBad++;
         di.lastSnrDb = (float)f.snrDb; di.lastCfoHz = f.cfoHz; di.lastFrameSec = t;
         if (f.crcOk) {
             tel.blocksOk++; tel.dataValid = true; lastGood = now();
@@ -303,6 +422,22 @@ struct MeshReceiver::Impl {
         row.size = (int)f.payload.size(); row.crcOk = f.crcOk;
         const bool crcBad = f.hdr.crc && !f.crcOk;
         if (crcBad) count(di.protocol, "CRC error");
+        {
+            lora::Params lp; lp.sf = di.sf; lp.bwHz = di.bwHz; lp.cr = f.hdr.cr; lp.preamble = di.preamble; lp.ldro = di.ldro; lp.crc = f.hdr.crc;
+            row.airSec = lora::airSeconds(lp, f.payload.size());
+            c.en.airSec += row.airSec;
+        }
+        if (crcBad) {
+            // the header of a Meshtastic frame that failed its CRC: often still right (a collision or a fade late in the frame), and
+            // then it says which packet was lost (packet id, from, relay); the CRC does not vouch for it
+            static const char* hx = "0123456789abcdef";
+            if (di.protocol == 1 && f.payload.size() >= 16)
+                for (size_t i = 0; i < 16; i++) { row.crcHeaderHex += hx[f.payload[i] >> 4]; row.crcHeaderHex += hx[f.payload[i] & 15]; }
+            // the whole frame as received and the CRC it carried: copies of one packet relayed by several nodes carry the same
+            // encrypted body, so bad copies can be voted into a good one later (tools/mesh_crc_repair.py)
+            for (uint8_t b : f.payload) { row.crcPayloadHex += hx[b >> 4]; row.crcPayloadHex += hx[b & 15]; }
+            row.crcRx = f.crcRx;
+        }
         MeshRadioInfo ri;
         ri.freqHz = row.freqHz; ri.bwHz = di.bwHz; ri.sf = di.sf; ri.cr = f.hdr.cr; ri.snrDb = f.snrDb; ri.levelDb = f.levelDb; ri.timeSec = t;
         MeshDecodeResult r;
@@ -337,12 +472,12 @@ struct MeshReceiver::Impl {
             row.note = r.packet.note.empty() ? "not a " + std::string(protoName(di.protocol)) + " packet" : r.packet.note;   // (the first one tried)
             if (crcBad) row.note = row.note == "CRC error" ? row.note : std::string("CRC error") + (row.note.empty() ? "" : "; " + row.note);
             count(di.protocol, "unknown");
-            capPush(tel.packets, std::move(row), kPacketCap);
+            pushPacket(std::move(row));
             return;
         }
         if (proto_ == 5 && crcBad) {   // a LoRaWAN frame with a failed CRC is never trusted: counted and listed, but no device is made from it
             row.note = row.note.empty() ? "CRC error" : std::string("CRC error; ") + row.note;
-            capPush(tel.packets, std::move(row), kPacketCap);
+            pushPacket(std::move(row));
             return;
         }
         if (proto_ == 5) { onLorawan(c, t, f, r, std::move(row)); return; }
@@ -390,10 +525,11 @@ struct MeshReceiver::Impl {
             if (u.batteryPct >= 0 || u.voltage >= 0 || u.hasEnv || u.hasPosition) {   // a telemetry or position report: kept with its time
                 MeshReading rd;
                 rd.timeSec = t; rd.protocol = pr; rd.id = u.nodeId;
-                rd.unixTime = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+                rd.unixTime = wallNow();
                 rd.batteryPct = u.batteryPct; rd.voltage = u.voltage; rd.channelUtilPct = u.channelUtilPct; rd.airUtilTxPct = u.airUtilTxPct;
                 rd.uptimeS = u.uptimeS; rd.hasEnv = u.hasEnv; rd.tempC = u.tempC; rd.humidity = u.humidity; rd.pressureHpa = u.pressureHpa;
                 rd.hasPosition = u.hasPosition; rd.lat = u.lat; rd.lon = u.lon; rd.altM = u.altM;
+                rec.reading(rd, (float)f.snrDb, n.longName);
                 capPush(tel.readings, std::move(rd), kReadingCap);
             }
             if (u.batteryPct >= 0 || u.voltage >= 0) n.devSec = t;
@@ -416,7 +552,7 @@ struct MeshReceiver::Impl {
             else if (mm.protocol == 2) mm.fromName = m.from;   // MeshCore puts the sender's name in the text
             capPush(tel.messages, std::move(mm), kMessageCap);
         }
-        capPush(tel.packets, std::move(row), kPacketCap);
+        pushPacket(std::move(row));
     }
 
     MeshAprsStation& aprsStation(int protocol, const std::string& call) {
@@ -480,7 +616,7 @@ struct MeshReceiver::Impl {
             mm.channel = m.channel; mm.from = m.from; mm.fromName = m.from; mm.to = m.to; mm.text = m.text.substr(0, 240); mm.packetId = m.packetId;
             capPush(tel.messages, std::move(mm), kMessageCap);
         }
-        capPush(tel.packets, std::move(row), kPacketCap);
+        pushPacket(std::move(row));
     }
 
     // LoRaWAN: the device table (by DevAddr; join requests by DevEUI) and the packet row. Nothing is decrypted.
@@ -540,7 +676,7 @@ struct MeshReceiver::Impl {
             }
         }
         (void)c;
-        capPush(tel.packets, std::move(row), kPacketCap);
+        pushPacket(std::move(row));
     }
 
     void report() {
@@ -605,6 +741,9 @@ struct MeshReceiver::Impl {
         nextReport = 0;
         lastGood = lastPreamble = -1e9;
         preamblesSeen = 0;
+        curMinute = -1;
+        lostSec = lostAtMinute = 0;
+        wallAnchored = minuteAnchored = false;
         dirty = true;
     }
 };
@@ -698,6 +837,11 @@ bool MeshReceiver::telemetry(MeshTelemetry& out, uint64_t lastSeq) {
     return true;
 }
 void MeshReceiver::setLogCallback(std::function<void(const std::string&)> cb) { std::lock_guard<std::mutex> lk(p_->mu); p_->log = std::move(cb); }
+void MeshReceiver::setRecordDir(const std::string& dir) { p_->rec.setDir(dir); }
+void MeshReceiver::setGainDb(double db) { p_->gainDb = db; }
+void MeshReceiver::setOccupancyThresholdDb(double db) { p_->occThresholdDb = db > 0 ? db : 6; }
+std::string MeshReceiver::recordStatus() const { return p_->rec.status(); }
+long long MeshReceiver::recordLines() const { return p_->rec.linesWritten(); }
 void MeshReceiver::setTunedHz(double hz) { std::lock_guard<std::mutex> lk(p_->mu); p_->tunedHz = hz; p_->dirty = true; }
 void MeshReceiver::setRegion(int r) { std::lock_guard<std::mutex> lk(p_->mu); p_->region = r >= 1 && r <= 3 ? r : 0; p_->dirty = true; }
 void MeshReceiver::setProtocols(int mask) { std::lock_guard<std::mutex> lk(p_->mu); p_->protocols = mask & 31; p_->dirty = true; }

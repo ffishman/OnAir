@@ -188,7 +188,7 @@ void packetTable(const App& a) {
                   "detail", "raw", "packet_id", "relay_node", "next_hop", "via_mqtt", "cfo_hz"};
         const double now = (double)std::time(nullptr);
         for (const dect2::MeshPacket& p : t.packets) {
-            const double ep = meshEpoch(t, p.timeSec, now);
+            const double ep = p.unixTime > 0 ? p.unixTime : meshEpoch(t, p.timeSec, now);   // (meshEpoch counts back from the last samples: off by a stall)
             // Meshtastic header: the packet id ties together the copies of one packet (flood) and the same packet seen by the node or MQTT;
             // relay_node is who sent this copy, next_hop who should send it on (last byte of the node number, 0 = none)
             const bool mt = p.protocol == 1 && p.parsed;

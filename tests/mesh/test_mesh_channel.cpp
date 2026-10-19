@@ -104,11 +104,14 @@ int main() {
     const auto scene = run("scene", 125, [&](cf32* x, size_t n) { syn->generate(x, n); }, ts);
     CHECK(scene.size() >= 2, "minute lines (%zu)", scene.size());
     long long frames = 0;
+    int withFrames = 0;
     for (const auto& v : scene) {
         if (v.size() != 20) continue;
         frames += atoll(v[13].c_str());
         const double occ = atof(v[10].c_str()), dec = atof(v[11].c_str()), und = atof(v[12].c_str());
         if (atoll(v[5].c_str()) < 30000) continue;   // the first part minute can be short
+        if (atoll(v[13].c_str()) == 0) continue;     // a channel the scene does not send on (main also searches MeshCore Czech Republic)
+        withFrames++;
         CHECK(dec > 0, "frames take air time (%s)", v[3].c_str());
         CHECK(occ > 0.5 * dec, "occupancy follows the air time: %.2f vs %.2f %%", occ, dec);
         // LongFast: what its frames do not account for stays small. MeshCore EU sits 93 kHz above it, inside LongFast's band, so it
@@ -117,6 +120,7 @@ int main() {
         CHECK(atoll(v[15].c_str()) == atoll(v[13].c_str()) + atoll(v[16].c_str()), "preambles = frames + lost (%s, %s, %s)", v[15].c_str(), v[13].c_str(), v[16].c_str());
     }
     CHECK(frames > 20, "frames counted (%lld)", frames);
+    CHECK(withFrames >= 2, "LongFast and MeshCore EU carry frames (%d channel minutes)", withFrames);
     printf("%s\n", fails ? "FAILED" : "all passed");
     return fails ? 1 : 0;
 }

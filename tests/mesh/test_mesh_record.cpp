@@ -48,7 +48,7 @@ int main() {
     CHECK(lines(a) == 3 && a.rfind("unix_time,time,frequency_hz,network", 0) == 0, "packet file: header and two lines\n%s", a.c_str());
     CHECK(a.find("TEXT_MESSAGE_APP,!e326743b,Sao Jose Barreiros,^all,LongFast,,3,1,2,1,1,28.5") != std::string::npos, "packet fields\n%s", a.c_str());
     CHECK(a.find("\"Teste, com virgula\"") != std::string::npos, "detail quoted");
-    CHECK(a.find(",ac,00,1,-652,456.7,,,\n") != std::string::npos, "relay, next hop, via MQTT, CFO, air time\n%s", a.c_str());
+    CHECK(a.find(",ac,00,1,-652,456.7,,,,0\n") != std::string::npos, "relay, next hop, via MQTT, CFO, air time\n%s", a.c_str());
     CHECK(lines(b) == 2 && b.find(",Sao Jose Barreiros,28.5,87,4.050,,,,,,,-27.600000,-48.620000,0") != std::string::npos, "reading line\n%s", b.c_str());
 
     // reopened (a restart): the header is not written again

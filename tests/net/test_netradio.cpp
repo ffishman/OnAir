@@ -2,6 +2,7 @@
 // address, the saved list.
 #include "../../core/src/net/tcp_client.h"
 #include "../../core/src/source/native_common.h"
+#include "dect2/engine/engine.h"
 #include "dect2/net/netradio.h"
 #include "dect2/net/share.h"
 #include "dect2/engine/device_claims.h"
@@ -28,7 +29,7 @@ struct FakeServer {
     sock_t ls = kBadSock;
     int port = 0;
     std::thread th;
-    std::atomic<bool> run{true}, dropNow{false};
+    std::atomic<bool> run{true}, dropNow{false}, pause{false};   // pause: keep the connection, send nothing (a stalled link)
     std::atomic<int> connections{0};
     std::mutex mu;
     std::vector<std::pair<int, uint32_t>> cmds;
@@ -87,7 +88,7 @@ struct FakeServer {
                         pend.erase(pend.begin(), pend.begin() + 5);
                     }
                 }
-                if (!sockSendAll(c, chunk.data(), chunk.size())) break;
+                if (!pause && !sockSendAll(c, chunk.data(), chunk.size())) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
             sockShutdown(c);
@@ -176,6 +177,37 @@ static void testRtlTcp() {
     CHECK(!err.empty());
     CHECK(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(3));
     fprintf(stderr, "unreachable: %s\n", err.c_str());
+}
+
+// The receiver on an rtl_tcp radio whose link stalls for a few seconds and comes back: the engine reports the loss, and clears it by
+// itself when the samples are back (it used to stay "radio disconnected" until Stop and Start, for every radio but a HackRF).
+static void testEngineRadioBack() {
+    FakeServer srv;
+    CHECK(srv.start());
+    if (!srv.port) return;
+    NetRadio nr; nr.type = NetRadio::RtlTcp; nr.host = "127.0.0.1"; nr.port = srv.port;
+    const auto devs = netRadioDevices({nr});
+    CHECK(devs.size() == 1 && devs[0].isNetwork());
+    if (devs.empty()) { srv.stop(); return; }
+    Engine rx;
+    TuneSettings t; t.sampleRate = 1.024e6; t.centerHz = 100e6; t.gainDb = 30;
+    FileOptions fo;
+    CHECK(rx.start(devs[0], t, fo));
+    auto waitUntil = [&](bool lost, int ms) {
+        for (int i = 0; i < ms / 20; i++) { if (rx.radioLost() == lost) return true; std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
+        return false;
+    };
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    CHECK(!rx.radioLost());
+    srv.pause = true;
+    CHECK(waitUntil(true, 5000));    // more than 2 s without samples
+    srv.pause = false;
+    CHECK(waitUntil(false, 3000));   // back without Stop and Start
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    CHECK(!rx.radioLost());          // and it stays back
+    CHECK(rx.sampleLoss().network);
+    rx.stop();
+    srv.stop();
 }
 
 // rtl_tcp servers of other radios: set by hand on a real RTL0 server, and found from an rsp_tcp-style greeting
@@ -993,6 +1025,7 @@ int main() {
     testSoapyRemote();
     testPluto();
     testRtlTcp();
+    testEngineRadioBack();
     testRtlTcpOther();
     testSpyServer();
     testSpyServerBytes();

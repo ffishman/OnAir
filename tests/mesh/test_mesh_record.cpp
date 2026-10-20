@@ -66,11 +66,11 @@ int main() {
         const fs::path old = dir / ("mesh-packets-" + dayOf(t3) + ".csv");
         { FILE* f = fopen(old.string().c_str(), "wb"); fputs("unix_time,time,frequency_hz\n1,2,3\n", f); fclose(f); }
         MeshRecorder r3; r3.setDir(dir.string());
-        MeshPacket q = p; q.crcOk = false; q.parsed = false; q.crcHeaderHex = "ffffffff3b7426e3"; q.crcPayloadHex = "ffffffff3b7426e3aabb"; q.crcRx = 0x12ab;
+        MeshPacket q = p; q.crcOk = false; q.parsed = false; q.crcHeaderHex = "ffffffff3b7426e3"; q.crcPayloadHex = "ffffffff3b7426e3aabb"; q.crcRx = 0x12ab; q.cfoDriftHz = -37;
         r3.packet(q, t3, "");
         const std::string nb = slurp(dir / ("mesh-packets-" + dayOf(t3) + "-b.csv"));
         CHECK(lines(slurp(old)) == 2 && lines(nb) == 2 && nb.find("CRC error") != std::string::npos, "other layout: a -b file\n%s", nb.c_str());
-        CHECK(nb.find(",,,,-652,456.7,ffffffff3b7426e3,ffffffff3b7426e3aabb,12ab\n") != std::string::npos, "CRC error: the unverified header, no relay fields\n%s", nb.c_str());
+        CHECK(nb.find(",,,,-652,456.7,ffffffff3b7426e3,ffffffff3b7426e3aabb,12ab,-37\n") != std::string::npos, "CRC error: the unverified header, no relay fields, the drift last\n%s", nb.c_str());
     }
     fs::remove_all(dir, ec);
     printf("mesh record: %s\n", fails ? "FAILED" : "ok");

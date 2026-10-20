@@ -145,7 +145,8 @@ static int rx(int argc, char** argv) {
     for (const auto& n : t.nodes) {
         printf("  %-10s %-14s %-24s %-5s %-24s %-9s", n.protocol == 1 ? "Meshtastic" : "MeshCore", n.id.c_str(), n.longName.c_str(), n.shortName.c_str(), n.hwModel.c_str(), n.role.c_str());
         if (n.hasPosition) printf(" %.5f %.5f %.0f m", n.lat, n.lon, n.altM);
-        if (n.batteryPct >= 0) printf(" battery %.0f %%", n.batteryPct);
+        if (n.batteryPct > 100) printf(" powered");
+        else if (n.batteryPct >= 0) printf(" battery %.0f %%", n.batteryPct);
         if (n.voltage >= 0) printf(" %.2f V", n.voltage);
         if (n.hasEnv) printf(" %.1f C %.0f %% %.1f hPa", n.tempC, n.humidity, n.pressureHpa);
         printf(" hops %d SNR %.1f dB last %.1f s, %u packets\n", n.hopsAway, n.lastSnrDb, n.lastHeard, n.packets);

@@ -122,12 +122,16 @@ fn clean_text(w: &mut Buf, p: &[u8]) {
     }
 }
 
-/// `s` if at most `n` bytes, else its first `n` bytes and "...".
+/// `s` if at most `n` bytes, else its first `n` bytes and "...", cut before a UTF-8 character that would not fit whole.
 fn clip(w: &mut Buf, s: &[u8], n: usize) {
     if s.len() <= n {
         w.bytes(s);
     } else {
-        w.bytes(&s[..n]);
+        let mut k = n;
+        while k > 0 && s[k] & 0xC0 == 0x80 {
+            k -= 1;
+        }
+        w.bytes(&s[..k]);
         w.str("...");
     }
 }
@@ -327,7 +331,7 @@ fn metrics(m: &Field, local: bool, u: &mut Node) {
             }
         } else {
             match (g.num, g.wire) {
-                (1, 0) => u.battery_pct = if g.value > 100 { 100.0 } else { g.value as f64 },
+                (1, 0) => u.battery_pct = if g.value > 100 { 101.0 } else { g.value as f64 }, // 101 = on external power, shown as "powered"
                 (2, 5) => u.voltage = g.as_f32() as f64,
                 (3, 5) => u.channel_util_pct = g.as_f32() as f64,
                 (4, 5) => u.air_util_tx_pct = g.as_f32() as f64,
@@ -346,13 +350,7 @@ fn telemetry(d: &Data, out: &mut Decoded) {
     while let Some(f) = r.next() {
         if f.num == 2 && f.wire == 2 {
             metrics(&f, false, &mut u);
-            let mut powered = false;
-            let mut mr = Reader::new(f.data);
-            while let Some(g) = mr.next() {
-                if g.num == 1 && g.wire == 0 && g.value > 100 {
-                    powered = true; // the firmware reports 101 when external power is used
-                }
-            }
+            let powered = u.battery_pct > 100.0; // the firmware reports 101 when external power is used
             det.write(|w| {
                 if powered {
                     w.str("powered, ");

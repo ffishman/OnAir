@@ -132,7 +132,8 @@ void nodeCard(const App& a) {
         kv("position", "%.5f %.5f", n->lat, n->lon);
         kv("altitude", "%.0f m", n->altM);
     }
-    if (n->batteryPct >= 0) kv("battery", "%.0f %%", n->batteryPct);
+    if (n->batteryPct > 100) kv("battery", "powered");
+    else if (n->batteryPct >= 0) kv("battery", "%.0f %%", n->batteryPct);
     if (n->voltage > 0) kv("voltage", "%.2f V", n->voltage);
     if (n->channelUtilPct >= 0) kv("channel use", "%.1f %%", n->channelUtilPct);
     if (n->airUtilTxPct >= 0) kv("air time tx", "%.2f %%", n->airUtilTxPct);

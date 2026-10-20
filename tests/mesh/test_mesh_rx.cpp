@@ -97,12 +97,25 @@ int main() {
     CHECK(!t.packets.empty() && std::fabs(t.packets.front().timeSec - 0.2) < 0.01, "first packet at %.4f s", t.packets.empty() ? -1.0 : t.packets.front().timeSec);
     // a reset keeps the tables (only clearResults() empties them) and starts the counters again; the report numbers go on
     const size_t nodesBefore = t.nodes.size();
+    const double firstBefore = t.packets.empty() ? -1 : t.packets.front().timeSec, clockBefore = t.timeSec;
     rx.reset();
     syn->generate(buf.data(), buf.size());
     rx.feed(buf.data(), buf.size());
     for (int i = 0; i < 10; i++) { syn->generate(buf.data(), buf.size()); rx.feed(buf.data(), buf.size()); }
     MeshTelemetry t2;
     CHECK(rx.telemetry(t2, last) && t2.seq > last && t2.nodes.size() >= nodesBefore && t2.blocksOk == 0, "after reset: seq %llu nodes %zu (%zu before)", (unsigned long long)t2.seq, t2.nodes.size(), nodesBefore);
+    // the clock runs on through the reset: the kept packets keep their times (no negative times, so the export can place them)
+    CHECK(!t2.packets.empty() && std::fabs(t2.packets.front().timeSec - firstBefore) < 1e-9 && t2.timeSec > clockBefore,
+          "after reset: first packet at %.4f s (%.4f before), clock %.2f s (%.2f before)", t2.packets.empty() ? -1.0 : t2.packets.front().timeSec, firstBefore, t2.timeSec, clockBefore);
+    {
+        bool neg = false, snrOk = true;
+        for (const auto& p : t2.packets) neg |= p.timeSec < 0;
+        for (const auto& n : t2.nodes) {
+            neg |= n.firstHeard < 0 || n.lastHeard < 0;
+            if (n.packets) snrOk &= n.snrMin <= n.snrSum / n.packets + 1e-3 && n.snrSum / n.packets <= n.snrMax + 1e-3;
+        }
+        CHECK(!neg && snrOk, "after reset: negative times %d, SNR mean within min/max %d", neg, snrOk);
+    }
     rx.clearResults();
     CHECK(rx.telemetry(t2, 0) && t2.nodes.empty() && t2.packets.empty(), "after clearResults: %zu nodes, %zu packets", t2.nodes.size(), t2.packets.size());
     {   // speed on noise alone (the search runs all the time)

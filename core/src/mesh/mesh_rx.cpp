@@ -199,6 +199,7 @@ struct MeshReceiver::Impl {
     int64_t nProc = 0;                     // input samples processed
     double nextReport = 0;
     double curRate = 0, curOffset = 0, curTuned = 0;
+    double clockBase = 0;                  // signal time reached before the last reset: the clock runs on through a reset
     MeshTelemetry tel;
     std::map<std::string, size_t> nodeIdx, aprsIdx, lwIdx;
     std::set<std::string> msgSeen;
@@ -247,7 +248,7 @@ struct MeshReceiver::Impl {
         if (cb) cb(s);
     }
 
-    double now() const { return curRate > 0 ? (double)nProc / curRate : 0; }
+    double now() const { return clockBase + (curRate > 0 ? (double)nProc / curRate : 0); }
 
     void rebuild() {
         double rt, off, tu; int reg, prot; bool all, cu; std::string mreg, mpre; MeshLoraSettings cs;
@@ -369,7 +370,8 @@ struct MeshReceiver::Impl {
 
     // a packet from the node: when, how strong (the report's first / last heard and SNR range)
     static void heard(MeshNode& n, double t, double snr, double level) {
-        if (n.packets == 0 || n.firstHeard < 0) { n.firstHeard = t; n.snrMin = n.snrMax = (float)snr; }
+        if (n.packets == 0) { n.snrMin = n.snrMax = (float)snr; n.snrSum = 0; }
+        if (n.firstHeard < 0) n.firstHeard = t;
         n.snrMin = std::min(n.snrMin, (float)snr); n.snrMax = std::max(n.snrMax, (float)snr);
         n.snrSum += snr;
         n.lastHeard = t; n.lastSnrDb = (float)snr; n.lastLevelDb = (float)level; n.packets++;
@@ -403,7 +405,7 @@ struct MeshReceiver::Impl {
     void onFrame(Chan& c, Dec& d, const lora::RxFrame& f) {
         MeshDecoderInfo& di = tel.decoders[d.info];
         // the frame's first sample in input samples, less the filters' delay
-        const double t = ((double)c.base + f.startSample * c.ch->decim() - c.ch->delayIn()) / curRate;
+        const double t = clockBase + ((double)c.base + f.startSample * c.ch->decim() - c.ch->delayIn()) / curRate;
         const bool good = f.crcOk || !f.hdr.crc;
         di.frames++;
         if (!good) di.crcBad++;
@@ -727,14 +729,16 @@ struct MeshReceiver::Impl {
 
     void resetState() {
         // forget the signal; the decoded lists stay (clearResults) and the report number goes on
+        // the clock runs on (as in ADS-B): the kept packets and nodes keep their times, so the export and the report still place them
         const uint64_t s = tel.seq;
-        const double t0 = tel.timeSec;     // the clock starts again: the kept lists move back by the time it had reached
+        const double t0 = std::max(now(), tel.timeSec);
         MeshTelemetry keep;
         moveLists(keep, tel);
         tel = MeshTelemetry();
         tel.seq = s;
+        tel.timeSec = t0;
         moveLists(tel, keep);
-        shiftTimes(tel, -t0);
+        clockBase = t0;
         reindex();
         pend.clear();
         nIn = nProc = 0;
@@ -771,10 +775,10 @@ void MeshReceiver::reset() {
     const uint64_t s = p_->pub.seq;
     const double tu = p_->pub.tunedHz;
     MeshTelemetry t;
+    const double t0 = p_->pub.timeSec;   // the clock runs on through a reset
     Impl::moveLists(t, p_->pub);         // the lists stay (clearResults)
-    Impl::shiftTimes(t, -p_->pub.timeSec);
     p_->pub = std::move(t);
-    p_->pub.seq = s; p_->pub.tunedHz = tu;
+    p_->pub.seq = s; p_->pub.tunedHz = tu; p_->pub.timeSec = t0;
 }
 
 void MeshReceiver::clearResults() {

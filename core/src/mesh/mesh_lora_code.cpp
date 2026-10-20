@@ -282,6 +282,7 @@ void TxFrame::render(cf32* out, size_t n, double t0, double rate) const {
             c = up(data[s], ud - (double)s * N);
         }
         double cyc = c + freqHz * t + phase0;
+        if (driftHz != 0) cyc += 0.5 * driftHz * chipRate / total * t * t;
         cyc -= std::floor(cyc);
         out[k] += amp * tab[(size_t)(cyc * 65536.0) & 0xFFFF];
     }

@@ -156,6 +156,7 @@ struct Demod::Impl {
     // frame
     double posS = 0, perS = 0, chipS = 0;   // next symbol (channel samples), symbol and chip lengths
     double cfoBins = 0, drift = 0;
+    double cfo0 = 0, cfoRate = 0;  // the carrier offset from the preamble, and how fast it moves during the frame (bins per symbol)
     double loopInt = 0;
     double posS0 = 0;              // the data start (a frame that fails its CRC is demodulated again from here)
     int retried = 0;
@@ -506,7 +507,7 @@ bool Demod::Impl::sfd(const ChanBuf& b) {
             levelLin = sMean / ((double)N * N);
         }
     }
-    cfoBins = cfo;
+    cfoBins = cfo; cfo0 = cfo; cfoRate = 0;
     drift = slope;                                     // chips per symbol
     chipS = rho * (1 + drift / N);
     perS = N * chipS;
@@ -526,6 +527,13 @@ void Demod::Impl::dataSymbol(const ChanBuf& b, std::vector<RxFrame>& out) {
     const int k = argmax();
     const double q = pw[(size_t)k] / mean;
     fd.push((uint16_t)k);
+    // Carrier loop. The offset found in the preamble is not kept fixed: a transmitter that warms up during a long frame moves its carrier,
+    // and from about a third of a bin the peaks of the last symbols land in the next bin (CR 4/5 only detects that). The peak's fractional
+    // position shows the residual offset of every symbol alike; a second-order loop follows it (only on clear peaks).
+    constexpr double kCfoP = 0.08, kCfoI = 0.005;   // follows 180 Hz over a LongFast frame; higher gains cost sensitivity in noise
+    static const bool noCfoLoop = std::getenv("DECT2_MESH_NO_CFO_LOOP") != nullptr;   // the offset of the preamble, as before (A/B on recordings)
+    if (!noCfoLoop && q > 8) { const double e = frac(k); cfoRate += kCfoI * e; cfoBins += kCfoP * e; }
+    cfoBins += cfoRate;
     // Timing loop. The peak's fractional position does not show a timing error: the shift of the tone is undone, on average,
     // by the phase step where the chirp wraps. That step itself measures it: the de-chirped symbol's two parts (before and after
     // the wrap at chip N - k) differ in phase by pi (tau + residual carrier offset), tau = how late the symbol starts, in chips.
@@ -567,14 +575,16 @@ void Demod::Impl::dataSymbol(const ChanBuf& b, std::vector<RxFrame>& out) {
             posS0 += 1.75 * dd * rho;
             posS = posS0;           // the start was placed 2.25 symbols past the down-chirp, less half the slope
             loopInt = 0;
+            cfoBins = cfo0; cfoRate = 0;
             startFd();
             return;
         }
         f.hdr = fd.header();
         f.crcRx = fd.receivedCrc();
         f.corrected = corr;
-        f.cfoHz = cfoBins * p.bwHz / N;
+        f.cfoHz = cfo0 * p.bwHz / N;   // the offset at the start of the frame (the node's own one, as a fingerprint)
         f.sfoPpm = (drift + loopInt) / N * 1e6;
+        f.cfoDriftHz = (cfoBins - cfo0) * p.bwHz / N;
         f.snrDb = 10 * std::log10(snrLin);
         f.levelDb = 10 * std::log10(std::max(levelLin, 1e-20));
         f.startSample = frameStart;

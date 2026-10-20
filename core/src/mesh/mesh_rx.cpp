@@ -418,7 +418,7 @@ struct MeshReceiver::Impl {
         } else if (f.hdr.crc) tel.blocksBad++;
         MeshPacket row;
         row.timeSec = t; row.protocol = di.protocol; row.preset = di.preset;
-        row.freqHz = c.freqHz + f.cfoHz; row.cfoHz = f.cfoHz;
+        row.freqHz = c.freqHz + f.cfoHz; row.cfoHz = f.cfoHz; row.cfoDriftHz = f.cfoDriftHz;
         row.sf = di.sf; row.cr = f.hdr.cr; row.bwHz = di.bwHz;
         row.levelDb = (float)f.levelDb; row.snrDb = (float)f.snrDb;
         row.size = (int)f.payload.size(); row.crcOk = f.crcOk;
